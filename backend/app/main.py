@@ -1,0 +1,47 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+
+from app.api.routes import cache, items
+from app.api.router import api_router
+from app.config.settings import settings
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title=settings.app_name,
+        summary="智能运营中心 AI Agent Runtime 后端接口",
+        description=(
+            "提供健康检查、AI 对话、运营分析、SSE 流式输出、会话查询、"
+            "Prompt 查询和用户反馈接口。"
+        ),
+        version="0.1.0",
+        docs_url="/docs",
+        redoc_url="/redoc",
+        openapi_url=f"{settings.api_v1_prefix}/openapi.json",
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    app.include_router(api_router, prefix=settings.api_v1_prefix)
+    app.include_router(cache.router, prefix="/api/cache", tags=["Cache"])
+    app.include_router(items.router, prefix=f"{settings.api_v1_prefix}/items", tags=["Items"])
+
+    @app.get("/", include_in_schema=False)
+    async def root() -> RedirectResponse:
+        return RedirectResponse(url="/docs")
+
+    @app.get("/api/v1/docs", include_in_schema=False)
+    async def api_docs() -> RedirectResponse:
+        return RedirectResponse(url="/docs")
+
+    return app
+
+
+app = create_app()

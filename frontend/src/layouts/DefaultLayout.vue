@@ -10,6 +10,7 @@
       </RouterLink>
       <nav class="app-nav" aria-label="主导航">
         <RouterLink to="/">工作台</RouterLink>
+        <RouterLink to="/items">数据管理</RouterLink>
       </nav>
     </header>
 

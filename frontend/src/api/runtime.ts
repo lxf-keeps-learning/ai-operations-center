@@ -6,6 +6,8 @@ import type {
   FeedbackRequest,
   FeedbackResponse,
   HealthStatus,
+  ItemCreateRequest,
+  ItemResponse,
   PaginatedResult,
   StreamEventName,
   StreamEventPayload,
@@ -92,6 +94,33 @@ export function createAgentStream(
     source,
     close: () => source.close(),
   }
+}
+
+export async function listItems(params: { page?: number; page_size?: number; is_active?: boolean } = {}) {
+  const query = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined) {
+      query.set(key, String(value))
+    }
+  })
+  const path = query.toString() ? `/items?${query}` : '/items'
+  const response = await request<PaginatedResult<ItemResponse>>(path)
+  return response.data
+}
+
+export async function createItem(payload: ItemCreateRequest) {
+  const response = await request<ItemResponse>('/items', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  return response.data
+}
+
+export async function deleteItem(id: number) {
+  const response = await request<boolean>(`/items/${id}`, {
+    method: 'DELETE',
+  })
+  return response.data
 }
 
 function parseStreamEvent(event: StreamEventName, message: MessageEvent<string>): StreamEventPayload {

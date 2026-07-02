@@ -78,6 +78,21 @@ export interface FeedbackResponse {
   feedback_id: string
 }
 
+export interface ItemResponse {
+  id: number
+  name: string
+  description: string | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface ItemCreateRequest {
+  name: string
+  description?: string | null
+  is_active?: boolean
+}
+
 export type StreamStatus = 'idle' | 'running' | 'streaming' | 'success' | 'failed' | 'stopped'
 
 export type StreamEventName = 'start' | 'progress' | 'token' | 'data' | 'error' | 'done' | 'stop'

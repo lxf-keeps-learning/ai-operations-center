@@ -11,6 +11,14 @@ const router = createRouter({
         title: '智能运营中心 AI Agent',
       },
     },
+    {
+      path: '/items',
+      name: 'items',
+      component: () => import('@/pages/ItemManagePage.vue'),
+      meta: {
+        title: '数据管理 - 智能运营中心',
+      },
+    },
   ],
   scrollBehavior() {
     return { top: 0 }
