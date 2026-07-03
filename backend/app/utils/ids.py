@@ -21,3 +21,11 @@ def new_conversation_id() -> str:
 
 def new_feedback_id() -> str:
     return _new_id("fb")
+
+
+def new_prompt_id() -> str:
+    return _new_id("pr")
+
+
+def new_span_id() -> str:
+    return _new_id("span")

@@ -26,8 +26,9 @@ async function handleQuery() {
 }
 
 function spanStatusClass(status: string) {
-  if (status === 'OK') return 'status-ok'
-  if (status === 'ERROR') return 'status-error'
+  const normalized = status.toLowerCase()
+  if (normalized === 'ok' || normalized === 'success') return 'status-ok'
+  if (normalized === 'error' || normalized === 'failed') return 'status-error'
   return 'status-unknown'
 }
 </script>
@@ -35,7 +36,7 @@ function spanStatusClass(status: string) {
 <template>
   <div class="trace-viewer">
     <h1>Trace 查询</h1>
-    <p class="page-subtitle">输入 traceId 查询全链路追踪信息（Sprint1 mock 数据）</p>
+    <p class="page-subtitle">输入 traceId 查询 Runtime 执行链路</p>
 
     <form class="trace-form" @submit.prevent="handleQuery">
       <input
@@ -63,7 +64,9 @@ function spanStatusClass(status: string) {
             <div class="timeline__header">
               <strong>{{ span.operation }}</strong>
               <span class="timeline__service">{{ span.service }}</span>
-              <span class="timeline__status" :class="spanStatusClass(span.status)">{{ span.status }}</span>
+              <span class="timeline__status" :class="spanStatusClass(span.status)">
+                {{ span.status }}
+              </span>
             </div>
             <div class="timeline__meta">
               <span>spanId: <code>{{ span.spanId }}</code></span>

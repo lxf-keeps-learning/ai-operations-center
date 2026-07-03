@@ -9,6 +9,7 @@ from app.config.settings import settings
 from app.core.exception.exception_handler import register_exception_handlers
 from app.core.logging.logger import setup_logging
 from app.core.middleware.trace_middleware import register_trace_middleware
+from app.runtime.api.router import runtime_router
 
 
 def create_app() -> FastAPI:
@@ -39,6 +40,7 @@ def create_app() -> FastAPI:
 
     app.include_router(api_router, prefix=settings.api_v1_prefix)
     app.include_router(v1_router, prefix=settings.api_v1_prefix)
+    app.include_router(runtime_router, prefix=settings.api_v1_prefix)
     app.include_router(cache.router, prefix="/api/cache", tags=["Cache"])
     app.include_router(items.router, prefix=f"{settings.api_v1_prefix}/items", tags=["Items"])
 

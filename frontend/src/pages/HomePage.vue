@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 
 import { createOperationAnalyzePayload } from '@/adapters/operationContext'
+import RuntimeChatPanel from '@/components/RuntimeChatPanel.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { useAppStore } from '@/stores/app'
 import type { AgentAnalyzeRequest } from '@/types/api'
@@ -182,6 +183,10 @@ onMounted(() => {
       <strong>Analyze Payload</strong>
     </div>
     <pre>{{ payloadText }}</pre>
+  </section>
+
+  <section class="chat-section">
+    <RuntimeChatPanel />
   </section>
 </template>
 
@@ -451,5 +456,9 @@ code {
     align-items: flex-start;
     grid-template-columns: 1fr;
   }
+}
+
+.chat-section {
+  margin-top: 24px;
 }
 </style>

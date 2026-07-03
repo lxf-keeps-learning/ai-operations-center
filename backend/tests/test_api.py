@@ -1,11 +1,49 @@
+from collections.abc import Iterator
+
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.routes import cache as cache_route
+from app.core.config.llm_settings import llm_settings
 from app.core.exception.error_code import REDIS_CONNECTION_ERROR, VALIDATION_ERROR
+from app.db.base import Base
 from app.db.redis import RedisPingError
 from app.main import app
 from app.models.item import SystemItem
+from app.runtime.llm.client import LlmResult, _default_runtime_prompt
+from app.runtime.models import (
+    AiConversation,
+    AiFeedback,
+    AiPrompt,
+    AiSession,
+    AiTrace,
+)
+from app.runtime.repositories.prompt_repository import PromptRepository
+from app.runtime.runtime_service import runtime_service
+from app.runtime.schemas.prompt_schema import PromptCreate
+from app.runtime.services.session_service import session_service
+from app.runtime.services.trace_service import trace_service
+
+_RUNTIME_MODELS = (AiConversation, AiFeedback, AiPrompt, AiSession, AiTrace)
+
+
+@pytest.fixture
+def runtime_db_session() -> Iterator[Session]:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_local = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
+    with session_local() as db:
+        yield db
+
+    Base.metadata.drop_all(engine)
 
 
 @pytest.mark.anyio
@@ -113,6 +151,140 @@ def test_cache_ping_enabled_connection_error(monkeypatch: pytest.MonkeyPatch) ->
     assert payload["data"]["enabled"] is True
     assert payload["data"]["status"] == "error"
     assert payload["data"]["error"] == "connect refused"
+
+
+def _fake_llm_result(content: str, system_prompt: str = "测试系统 Prompt") -> LlmResult:
+    return LlmResult(
+        content=content,
+        model="deepseek-chat",
+        prompt_tokens=8,
+        completion_tokens=6,
+        total_tokens=14,
+        cost_ms=12,
+        success=True,
+        system_prompt=system_prompt,
+    )
+
+
+def test_default_runtime_prompt_identifies_deepseek_not_openai() -> None:
+    provider = llm_settings.get_provider("deepseek")
+    assert provider is not None
+
+    prompt = _default_runtime_prompt(provider)
+
+    assert "DeepSeek" in prompt
+    assert provider.model in prompt
+    assert "不要自称 OpenAI" in prompt
+    assert "GPT" in prompt
+
+
+def test_runtime_chat_records_prompt_version_and_span_chain(
+    runtime_db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompt_content = (
+        "请面向智能运营中心，"
+        "结合上下文给出可追溯的告警分析。"
+    )
+    prompt = PromptRepository().create(
+        runtime_db_session,
+        PromptCreate(
+            code="ioc_alarm_analysis",
+            name="运营告警分析",
+            content=prompt_content,
+            scene_code="alarm",
+            created_by="tester",
+        ),
+    )
+    PromptRepository().update_status(runtime_db_session, prompt.id, "active")
+
+    def fake_chat(
+        prompt_content: str | None,
+        user_message: str,
+        history: list[dict[str, str]] | None = None,
+    ) -> LlmResult:
+        assert prompt_content == prompt.content
+        assert user_message == "分析今日高风险告警"
+        assert history == []
+        return _fake_llm_result(
+            "这是 DeepSeek 生成的告警分析。",
+            system_prompt=prompt.content,
+        )
+
+    monkeypatch.setattr("app.runtime.runtime_service.llm_client.chat", fake_chat)
+
+    result = runtime_service.chat(
+        db=runtime_db_session,
+        user_id="u_sprint2",
+        message="分析今日高风险告警",
+        biz_type="alarm",
+        prompt_code="ioc_alarm_analysis",
+    )
+
+    spans = trace_service.list_by_trace_id(runtime_db_session, result["trace_id"])
+    span_types = [span.span_type for span in spans]
+    assert span_types == ["runtime", "graph", "node", "tool", "llm", "runtime"]
+
+    llm_span = next(span for span in spans if span.span_type == "llm")
+    assert llm_span.prompt_id == prompt.id
+    assert llm_span.prompt_code == "ioc_alarm_analysis"
+    assert llm_span.prompt_version == 1
+    assert llm_span.prompt_snapshot == prompt.content
+    assert llm_span.model_name == "deepseek-chat"
+    assert llm_span.total_tokens is not None
+    assert llm_span.total_tokens > 0
+
+    tool_span = next(span for span in spans if span.span_type == "tool")
+    assert tool_span.output_data
+    assert tool_span.output_data["runtime_db_stores_ioc_master_data"] is False
+
+    session = session_service.get_by_id(runtime_db_session, result["session_id"])
+    assert session is not None
+    assert session.status == "success"
+    assert session.output_text == result["answer"]
+    assert result["reply"] == result["answer"]
+    assert trace_service.list_by_session_id(runtime_db_session, result["session_id"]) == spans
+
+
+def test_runtime_chat_passes_conversation_history_to_llm(
+    runtime_db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_chat(
+        prompt_content: str | None,
+        user_message: str,
+        history: list[dict[str, str]] | None = None,
+    ) -> LlmResult:
+        calls.append(
+            {
+                "prompt_content": prompt_content,
+                "user_message": user_message,
+                "history": history or [],
+            }
+        )
+        return _fake_llm_result(f"回答：{user_message}")
+
+    monkeypatch.setattr("app.runtime.runtime_service.llm_client.chat", fake_chat)
+
+    first = runtime_service.chat(
+        db=runtime_db_session,
+        user_id="u_sprint2",
+        message="记住：园区A今天有高风险告警",
+    )
+    runtime_service.chat(
+        db=runtime_db_session,
+        user_id="u_sprint2",
+        message="我刚才说的是哪个园区？",
+        conversation_id=first["conversation_id"],
+    )
+
+    assert calls[0]["history"] == []
+    assert calls[1]["history"] == [
+        {"role": "user", "content": "记住：园区A今天有高风险告警"},
+        {"role": "assistant", "content": "回答：记住：园区A今天有高风险告警"},
+    ]
 
 
 @pytest.mark.anyio
