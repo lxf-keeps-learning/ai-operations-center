@@ -1,4 +1,4 @@
-import type { ApiEnvelope } from '@/types/api'
+import { getTraceId } from '@/utils/trace'
 
 const DEFAULT_TIMEOUT = 15_000
 
@@ -49,6 +49,8 @@ export async function request<T>(path: string, options: RequestOptions = {}) {
   const timeoutId = window.setTimeout(() => controller.abort(), timeout)
   const headers = new Headers(options.headers)
 
+  headers.set('X-Trace-Id', getTraceId())
+
   if (!(options.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
@@ -60,7 +62,7 @@ export async function request<T>(path: string, options: RequestOptions = {}) {
       signal: options.signal ?? controller.signal,
     })
     const text = await response.text()
-    const payload = text ? (JSON.parse(text) as ApiEnvelope<T>) : null
+    const payload: { code: number; message: string; traceId?: string; data: T } | null = text ? JSON.parse(text) : null
 
     if (!response.ok) {
       throw new ApiRequestError(payload?.message || `HTTP ${response.status}`, {
@@ -82,7 +84,7 @@ export async function request<T>(path: string, options: RequestOptions = {}) {
       })
     }
 
-    return payload
+    return payload.data
   } catch (error) {
     if (error instanceof ApiRequestError) {
       throw error

@@ -4,10 +4,15 @@ from fastapi.responses import RedirectResponse
 
 from app.api.routes import cache, items
 from app.api.router import api_router
+from app.api.v1.router import v1_router
 from app.config.settings import settings
+from app.core.exception.exception_handler import register_exception_handlers
+from app.core.logging.logger import setup_logging
+from app.core.middleware.trace_middleware import register_trace_middleware
 
 
 def create_app() -> FastAPI:
+    setup_logging(level=settings.log_level)
     app = FastAPI(
         title=settings.app_name,
         summary="智能运营中心 AI Agent Runtime 后端接口",
@@ -29,7 +34,11 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    register_trace_middleware(app)
+    register_exception_handlers(app)
+
     app.include_router(api_router, prefix=settings.api_v1_prefix)
+    app.include_router(v1_router, prefix=settings.api_v1_prefix)
     app.include_router(cache.router, prefix="/api/cache", tags=["Cache"])
     app.include_router(items.router, prefix=f"{settings.api_v1_prefix}/items", tags=["Items"])
 

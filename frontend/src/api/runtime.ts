@@ -27,24 +27,21 @@ export interface AgentStreamController {
 const streamEvents: StreamEventName[] = ['start', 'progress', 'token', 'data', 'error', 'done', 'stop']
 
 export async function getHealth() {
-  const response = await request<HealthStatus>('/health')
-  return response.data
+  return request<HealthStatus>('/health')
 }
 
 export async function analyzeAgent(payload: AgentAnalyzeRequest) {
-  const response = await request<AgentTaskResponse>('/agent/analyze', {
+  return request<AgentTaskResponse>('/agent/analyze', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
-  return response.data
 }
 
 export async function chatAgent(payload: AgentChatRequest) {
-  const response = await request<AgentTaskResponse>('/agent/chat', {
+  return request<AgentTaskResponse>('/agent/chat', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
-  return response.data
 }
 
 export async function listConversations(params: { agent_code?: string; page?: number; page_size?: number } = {}) {
@@ -57,16 +54,14 @@ export async function listConversations(params: { agent_code?: string; page?: nu
   })
 
   const path = query.toString() ? `/conversations?${query}` : '/conversations'
-  const response = await request<PaginatedResult<ConversationSummary>>(path)
-  return response.data
+  return request<PaginatedResult<ConversationSummary>>(path)
 }
 
 export async function submitFeedback(payload: FeedbackRequest) {
-  const response = await request<FeedbackResponse>('/feedback', {
+  return request<FeedbackResponse>('/feedback', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
-  return response.data
 }
 
 export function createAgentStream(
@@ -104,23 +99,20 @@ export async function listItems(params: { page?: number; page_size?: number; is_
     }
   })
   const path = query.toString() ? `/items?${query}` : '/items'
-  const response = await request<PaginatedResult<ItemResponse>>(path)
-  return response.data
+  return request<PaginatedResult<ItemResponse>>(path)
 }
 
 export async function createItem(payload: ItemCreateRequest) {
-  const response = await request<ItemResponse>('/items', {
+  return request<ItemResponse>('/items', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
-  return response.data
 }
 
 export async function deleteItem(id: number) {
-  const response = await request<boolean>(`/items/${id}`, {
+  return request<boolean>(`/items/${id}`, {
     method: 'DELETE',
   })
-  return response.data
 }
 
 function parseStreamEvent(event: StreamEventName, message: MessageEvent<string>): StreamEventPayload {

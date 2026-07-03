@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     )
     database_url: str = "mysql+pymysql://ioc_user:ioc_password@localhost:3306/ioc_ai"
     app_timezone: str = "Asia/Shanghai"
+    log_level: str = "INFO"
     redis_enabled: bool = False
     redis_url: str = "redis://localhost:6379/0"
 
