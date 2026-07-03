@@ -48,14 +48,14 @@ def find_env_files() -> list[str]:
     backend_root = Path(__file__).resolve().parent.parent.parent.parent
     files = []
 
+    default = backend_root / ".env"
+    if default.exists():
+        files.append(str(default))
+
     env = current_env()
     specific = _ENV_FILE_MAP.get(env, ".env")
     specific_path = backend_root / specific
-    if specific_path.exists():
+    if specific_path.exists() and str(specific_path) not in files:
         files.append(str(specific_path))
-
-    default = backend_root / ".env"
-    if default.exists() and str(default) not in files:
-        files.append(str(default))
 
     return files

@@ -1,8 +1,15 @@
 from typing import Generic, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
+
+from app.core.trace.trace_context import get_trace_id
+from app.utils.ids import new_trace_id
 
 T = TypeVar("T")
+
+
+def _default_trace_id() -> str:
+    return get_trace_id() or new_trace_id()
 
 
 class IocBaseModel(BaseModel):
@@ -12,8 +19,13 @@ class IocBaseModel(BaseModel):
 class ApiResponse(IocBaseModel, Generic[T]):
     code: int = 0
     message: str = "success"
-    trace_id: str = Field(alias="traceId")
+    trace_id: str = Field(default_factory=_default_trace_id, alias="traceId")
     data: T | None = None
+
+    @computed_field
+    @property
+    def success(self) -> bool:
+        return self.code == 0
 
 
 class PageContext(IocBaseModel):

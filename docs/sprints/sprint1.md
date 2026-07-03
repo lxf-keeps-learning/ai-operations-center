@@ -891,7 +891,7 @@ utils/request.ts
 
 ## 一、项目背景
 
-当前项目是 AIOperationsCenter / 智能运营中心 AI Agent 项目。Sprint1 目标是建设基础设施能力，为后续 AI Runtime、Tool Center、Agent Graph 提供统一公共能力。
+当前项目是 AIOperationsCenter项目。Sprint1 目标是建设基础设施能力，为后续 AI Runtime、Tool Center、Agent Graph 提供统一公共能力。
 
 本次不要实现完整 AI 问答业务，不要实现复杂 Agent Graph，只做基础设施底座。
 
@@ -1500,3 +1500,52 @@ Sprint1 最终要达到：
 ```text
 任意一个前端请求进入后端后，都能读取配置、生成 TraceId、记录日志、统一处理异常、统一返回 DTO，并且能在前端基础设施控制台看到配置、健康状态、错误码和基础日志。
 ```
+
+
+
+### 总结
+1. 完成统一的DTO配置
+   1. 后端封装统一的接口，定义接口格式
+   2. 输出HTTP状态码与业务错误码文档
+   3. 前端请求封装要求
+      1. 统一baseUrl
+      2. 自动加入X-Trace-Id，同时理解为什么不用requestId，而是使用x-trace-id】
+      3. 统一处理ApiResponse
+      4. 成功时返回data
+      5. 错误时返回message
+      6. 保留ttraceId
+      7. 不用在每个页面重复写code判断逻辑
+2. 后端能力建设
+   1. 响应统一模型在response_schema.py
+   2. 实现业务错误码枚举活常量error_code.py
+   3. 实现全局异常处理 exception_handler.py
+   4. ...
+3. 前端能力建设
+   1. 增加基础设施控制台入口
+      1. 配置中心
+      2. 模型配置
+      3. 日志中心
+      4. Trace查询
+      5. 错误码说明
+      6. 监控检查
+      7. context示例
+
+### 思考
+1. Trace 和 Logger的区别是什么？
+   1. Log是日志，可以说所有的操作记录 和用户行为的大混合记录
+   2. Trace是通过id把一条完整的线路记录下来
+2. 为什么企业项目必须统一异常
+   1. 便于排查问题
+   2. 遇到问题时，有托底措施
+   3. 不会因为突发异常导致页面崩掉
+3. 为什么不能把UserContext直接放进数据库
+   1. 用户的上下文信息过多时，数据存储量过大
+   2. 需要区分state、记忆
+4. 为什么 GraphState 不应该保存 ORM 对象？
+   1. GraphState 是当前graph 流程的数据
+   2. ORM是记忆？需要完善
+5. 统一 Response 如何提升前后端协作效率？
+   1. 统一规范后减少不必要的沟通
+   2. 前后端按规范统一开发即可
+6. 如果线上 AI 调用失败，如何通过 Trace 定位？
+   1. Trace的id 是唯一的，通过id 可以将一整条线路串联起来，用于排查问题

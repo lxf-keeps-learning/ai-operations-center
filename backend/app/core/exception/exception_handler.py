@@ -34,6 +34,7 @@ def _build_response(code: int, message: str, http_status: int) -> JSONResponse:
     trace_id = _ensure_trace_id()
     return JSONResponse(
         status_code=http_status,
+        headers={"X-Trace-Id": trace_id},
         content=ApiResponse(
             code=code,
             message=message,
@@ -48,6 +49,7 @@ async def app_exception_handler(request: Request, exc: AppException) -> JSONResp
     trace_id = _ensure_trace_id()
     return JSONResponse(
         status_code=exc.http_status,
+        headers={"X-Trace-Id": trace_id},
         content=ApiResponse(
             code=exc.code,
             message=exc.message,
@@ -65,10 +67,8 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 
 async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     errors = exc.errors()
-    first_error = errors[0] if errors else {}
-    msg = first_error.get("msg", "请求参数校验失败")
     logger.warning("RequestValidationError: detail=%s", errors)
-    return _build_response(code=VALIDATION_ERROR.code, message=msg, http_status=422)
+    return _build_response(code=VALIDATION_ERROR.code, message=VALIDATION_ERROR.message, http_status=422)
 
 
 async def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:

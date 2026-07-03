@@ -1,6 +1,17 @@
 import os
-from dataclasses import dataclass, field
-from typing import Self
+from dataclasses import dataclass
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.core.config.env import find_env_files
+
+
+class LLMSecretSettings(BaseSettings):
+    qwen_api_key: str = ""
+    deepseek_api_key: str = ""
+    doubao_api_key: str = ""
+
+    model_config = SettingsConfigDict(env_file=find_env_files(), env_file_encoding="utf-8", extra="ignore")
 
 
 @dataclass
@@ -29,9 +40,10 @@ class LLMProviderConfig:
         }
 
 
-_QWEN_API_KEY = os.environ.get("QWEN_API_KEY", "")
-_DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
-_DOUBAO_API_KEY = os.environ.get("DOUBAO_API_KEY", "")
+_secrets = LLMSecretSettings()
+_QWEN_API_KEY = os.environ.get("QWEN_API_KEY", _secrets.qwen_api_key)
+_DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", _secrets.deepseek_api_key)
+_DOUBAO_API_KEY = os.environ.get("DOUBAO_API_KEY", _secrets.doubao_api_key)
 
 
 class LLMSettings:

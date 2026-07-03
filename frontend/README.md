@@ -72,11 +72,18 @@ VITE_API_PROXY_TARGET=http://127.0.0.1:8000
 
 ## 后端接口约定
 
-前端 API 层位于 `src/api/runtime.ts`，已按项目接口文档预留：
+前端 API 层位于 `src/api/`，Sprint1 基础设施控制台页面统一通过 `src/utils/request.ts` 调用后端 `/api/v1` 接口。
 
 | 方法 | 路径 | 用途 |
 |------|------|------|
 | GET | `/api/v1/health` | 健康检查 |
+| GET | `/api/v1/config/runtime` | 当前运行环境 |
+| GET | `/api/v1/config/models` | 模型配置列表 |
+| GET | `/api/v1/errors/codes` | 错误码说明 |
+| GET | `/api/v1/logs/recent` | 最近日志 |
+| GET | `/api/v1/logs/llm-usage` | LLM 使用日志 |
+| GET | `/api/v1/traces/{traceId}` | Trace 查询 |
+| GET | `/api/v1/context/current` | Context 示例 |
 | POST | `/api/v1/agent/chat` | AI 对话 |
 | POST | `/api/v1/agent/analyze` | AI 分析 |
 | GET | `/api/v1/agent/stream` | SSE 流式输出 |
@@ -102,3 +109,5 @@ npm run preview      # 本地预览生产包
 - 复用状态放在 `src/stores/`，复杂流程不要堆在页面组件里。
 - DTO 和 SSE 事件类型统一维护在 `src/types/`。
 - 不在组件内直接拼接后端域名，统一通过 `VITE_API_BASE_URL` 和 Vite proxy 管理。
+- 每次请求由 `src/utils/request.ts` 自动生成 `X-Trace-Id`，响应中的 `traceId` 可用于后端日志排查。
+- 前端只展示后端返回的模型非敏感字段，不保存也不渲染任何模型 API Key。

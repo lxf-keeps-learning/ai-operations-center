@@ -1,12 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
+from app.core.exception.base_exception import AppException
+from app.core.exception.error_code import ITEM_NOT_FOUND
 from app.db.session import get_db
 from app.models.item import SystemItem
 from app.schemas.common import ApiResponse, PaginatedResult
 from app.schemas.item import ItemCreate, ItemResponse, ItemUpdate
-from app.utils.ids import new_trace_id
 
 router = APIRouter()
 
@@ -21,7 +22,7 @@ def create_item(payload: ItemCreate, db: Session = Depends(get_db)) -> ApiRespon
     db.add(item)
     db.commit()
     db.refresh(item)
-    return ApiResponse(message="success", traceId=new_trace_id(), data=item)
+    return ApiResponse(data=item)
 
 
 @router.get("", response_model=ApiResponse[PaginatedResult[ItemResponse]], summary="查询 Item 列表")
@@ -41,20 +42,16 @@ def list_items(
     total = db.scalar(count_statement) or 0
     items = db.scalars(statement.offset((page - 1) * page_size).limit(page_size)).all()
 
-    return ApiResponse(
-        message="success",
-        traceId=new_trace_id(),
-        data=PaginatedResult(items=items, total=total, page=page, page_size=page_size),
-    )
+    return ApiResponse(data=PaginatedResult(items=items, total=total, page=page, page_size=page_size))
 
 
 @router.get("/{id}", response_model=ApiResponse[ItemResponse], summary="查询 Item 详情")
 def get_item(id: int = Path(description="Item ID"), db: Session = Depends(get_db)) -> ApiResponse[ItemResponse]:
     item = db.get(SystemItem, id)
     if item is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="item not found")
+        raise AppException.from_error_code(ITEM_NOT_FOUND)
 
-    return ApiResponse(message="success", traceId=new_trace_id(), data=item)
+    return ApiResponse(data=item)
 
 
 @router.put("/{id}", response_model=ApiResponse[ItemResponse], summary="更新 Item")
@@ -65,7 +62,7 @@ def update_item(
 ) -> ApiResponse[ItemResponse]:
     item = db.get(SystemItem, id)
     if item is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="item not found")
+        raise AppException.from_error_code(ITEM_NOT_FOUND)
 
     update_data = payload.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -73,15 +70,15 @@ def update_item(
 
     db.commit()
     db.refresh(item)
-    return ApiResponse(message="success", traceId=new_trace_id(), data=item)
+    return ApiResponse(data=item)
 
 
 @router.delete("/{id}", response_model=ApiResponse[bool], summary="删除 Item")
 def delete_item(id: int = Path(description="Item ID"), db: Session = Depends(get_db)) -> ApiResponse[bool]:
     item = db.get(SystemItem, id)
     if item is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="item not found")
+        raise AppException.from_error_code(ITEM_NOT_FOUND)
 
     db.delete(item)
     db.commit()
-    return ApiResponse(message="success", traceId=new_trace_id(), data=True)
+    return ApiResponse(data=True)

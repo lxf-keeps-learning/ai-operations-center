@@ -1,19 +1,21 @@
 from fastapi import APIRouter
 
-from app.config.settings import settings
-from app.schemas.common import ApiResponse
-from app.schemas.health import HealthStatus
-from app.utils.ids import new_trace_id
+from app.core.config.settings import settings
+from app.core.schema.response_schema import ApiResponse
 
 router = APIRouter()
 
 
-@router.get("/health", response_model=ApiResponse[HealthStatus], summary="服务健康检查")
-async def health_check() -> ApiResponse[HealthStatus]:
-    trace_id = new_trace_id()
+@router.get("/health", response_model=ApiResponse[dict], summary="服务健康检查")
+async def health_check() -> ApiResponse[dict]:
     redis_status = "CONFIGURED" if settings.redis_enabled else "DISABLED"
     return ApiResponse(
-        message="success",
-        traceId=trace_id,
-        data=HealthStatus(status="UP", database="MOCK", redis=redis_status, llm="MOCK"),
+        data={
+            "status": "UP",
+            "env": settings.app_env,
+            "version": settings.version,
+            "database": "MOCK",
+            "redis": redis_status,
+            "llm": "MOCK",
+        }
     )

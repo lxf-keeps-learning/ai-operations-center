@@ -3,6 +3,8 @@ from functools import cached_property
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.config.env import find_env_files
+
 
 class Settings(BaseSettings):
     app_name: str = "智能运营中心 AI Agent Runtime"
@@ -18,7 +20,7 @@ class Settings(BaseSettings):
     redis_enabled: bool = False
     redis_url: str = "redis://localhost:6379/0"
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=find_env_files(), env_file_encoding="utf-8", extra="ignore")
 
     @cached_property
     def cors_origins(self) -> list[str]:

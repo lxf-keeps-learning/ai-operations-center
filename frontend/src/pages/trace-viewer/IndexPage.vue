@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 
 import { getTrace } from '@/api/trace'
-import type { Span, TraceData } from '@/api/trace'
+import type { TraceData } from '@/api/trace'
 import StatusCard from '@/components/status-card/StatusCard.vue'
 
 const traceId = ref('')
@@ -57,7 +57,7 @@ function spanStatusClass(status: string) {
       </div>
 
       <div class="timeline">
-        <div v-for="(span, i) in traceData.spans" :key="span.spanId" class="timeline__item">
+        <div v-for="span in traceData.spans" :key="span.spanId" class="timeline__item">
           <div class="timeline__dot" :class="spanStatusClass(span.status)" />
           <div class="timeline__content">
             <div class="timeline__header">

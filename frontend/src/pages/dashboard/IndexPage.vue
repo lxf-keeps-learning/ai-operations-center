@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 
 import { getRuntime } from '@/api/config'
 import { getHealth } from '@/api/health'
@@ -64,10 +65,10 @@ onMounted(async () => {
     </section>
 
     <section class="dashboard__grid">
-      <a v-for="page in infraPages" :key="page.path" class="infra-card" :href="page.path">
+      <RouterLink v-for="page in infraPages" :key="page.path" class="infra-card" :to="page.path">
         <h3>{{ page.name }}</h3>
         <p>{{ page.desc }}</p>
-      </a>
+      </RouterLink>
     </section>
   </div>
 </template>

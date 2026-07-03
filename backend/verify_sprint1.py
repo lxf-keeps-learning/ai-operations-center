@@ -2,11 +2,9 @@
 """Sprint1 验收脚本 — 测试所有接口后输出结果"""
 
 import json
-import re
-import subprocess
 import sys
 from urllib import request as urllib_request
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
 BASE = "http://127.0.0.1:8000"
 results = []
@@ -26,7 +24,13 @@ def get(path):
         body = json.loads(resp.read())
         headers = dict(resp.headers)
         return body, headers, resp.status
-    except URLError as e:
+    except HTTPError as e:
+        try:
+            body = json.loads(e.read())
+        except json.JSONDecodeError:
+            body = None
+        return body, dict(e.headers), e.code
+    except URLError:
         return None, {}, 0
     except json.JSONDecodeError:
         return None, {}, 0
@@ -40,7 +44,8 @@ ok(f"后端启动成功 (HTTP {resp.status})") if resp.status == 200 else fail("
 body, headers, status = get("/api/v1/health")
 if body:
     fields = list(body.keys())
-    ok(f"/api/v1/health fields: {fields}") if all(k in body for k in ["code", "message", "traceId", "data"]) else fail("缺少必要字段")
+    required_fields = ["code", "message", "traceId", "success", "data"]
+    ok(f"/api/v1/health fields: {fields}") if all(k in body for k in required_fields) else fail("缺少必要字段")
 
 # ── 3. 所有基础设施接口统一格式 ──
 v1_paths = [
@@ -59,7 +64,7 @@ for path in v1_paths:
         fail(f"{path:42s} 格式异常: {list(body.keys()) if body else 'N/A'}")
 
 # ── 4. 异常接口统一格式 ──
-body, _, status = get("/api/v1/items/99999")
+body, _, status = get("/api/v1/prompts/__missing__")
 if body and all(k in body for k in ["code", "message", "traceId", "success", "data"]):
     ok(f"异常接口 (HTTP {status}) code={body['code']} success={body['success']} msg={body['message']}")
 else:

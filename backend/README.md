@@ -23,6 +23,7 @@ backend/
 │   ├── api/                # API 路由层，只接收参数和返回 DTO
 │   ├── application/        # 应用编排层，后续接入 LangGraph
 │   ├── config/             # 配置管理
+│   ├── core/               # Sprint1 基础设施：响应、异常、Trace、Context、配置、日志
 │   ├── db/                 # 数据库连接和 Session 依赖
 │   ├── models/             # SQLAlchemy 模型
 │   ├── runtime/            # 运行态数据，当前为内存实现
@@ -149,6 +150,13 @@ http://localhost:8000/api/v1/openapi.json
 | 方法 | 路径 | 用途 |
 |------|------|------|
 | GET | `/api/v1/health` | 服务健康检查 |
+| GET | `/api/v1/config/runtime` | 当前运行环境与默认模型 |
+| GET | `/api/v1/config/models` | 模型配置列表，隐藏 API Key |
+| GET | `/api/v1/errors/codes` | 业务错误码列表 |
+| GET | `/api/v1/logs/recent` | 最近日志 |
+| GET | `/api/v1/logs/llm-usage` | LLM 使用日志 |
+| GET | `/api/v1/traces/{trace_id}` | Trace 示例链路 |
+| GET | `/api/v1/context/current` | 当前请求上下文 |
 | POST | `/api/v1/agent/chat` | 发起 AI 对话任务 |
 | POST | `/api/v1/agent/analyze` | 发起 AI 分析任务 |
 | GET | `/api/v1/agent/stream` | SSE 流式输出 |
@@ -158,20 +166,20 @@ http://localhost:8000/api/v1/openapi.json
 | GET | `/api/v1/prompts/{prompt_code}` | 查询 Prompt |
 | POST | `/api/v1/feedback` | 提交用户反馈 |
 | GET | `/api/cache/ping` | Redis 可选健康检查 |
-| GET | `/api/items` | 查询 Demo Item 列表 |
-| POST | `/api/items` | 创建 Demo Item |
-| GET | `/api/items/{id}` | 查询 Demo Item 详情 |
-| PUT | `/api/items/{id}` | 更新 Demo Item |
-| DELETE | `/api/items/{id}` | 删除 Demo Item |
+| GET | `/api/v1/items` | 查询 Demo Item 列表 |
+| POST | `/api/v1/items` | 创建 Demo Item |
+| GET | `/api/v1/items/{id}` | 查询 Demo Item 详情 |
+| PUT | `/api/v1/items/{id}` | 更新 Demo Item |
+| DELETE | `/api/v1/items/{id}` | 删除 Demo Item |
 
 ## Demo CRUD 测试
 
 ```bash
-curl -X POST http://localhost:8000/api/items \
+curl -X POST http://localhost:8000/api/v1/items \
   -H "Content-Type: application/json" \
   -d '{"name":"Sprint0 Demo","description":"MySQL CRUD demo","is_active":true}'
 
-curl http://localhost:8000/api/items
+curl http://localhost:8000/api/v1/items
 ```
 
 ## Redis 健康检查
@@ -197,6 +205,7 @@ docker compose up -d mysql
 ## 验证命令
 
 ```bash
+source .venv/bin/activate
 pytest
 curl http://localhost:8000/api/v1/health
 ```

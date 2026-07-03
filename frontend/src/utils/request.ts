@@ -1,4 +1,4 @@
-import { getTraceId } from '@/utils/trace'
+import { createTraceId, setLastTraceId } from '@/utils/trace'
 
 const DEFAULT_TIMEOUT = 15_000
 
@@ -48,8 +48,9 @@ export async function request<T>(path: string, options: RequestOptions = {}) {
   const timeout = options.timeout ?? DEFAULT_TIMEOUT
   const timeoutId = window.setTimeout(() => controller.abort(), timeout)
   const headers = new Headers(options.headers)
+  const traceId = createTraceId()
 
-  headers.set('X-Trace-Id', getTraceId())
+  headers.set('X-Trace-Id', traceId)
 
   if (!(options.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
@@ -62,25 +63,33 @@ export async function request<T>(path: string, options: RequestOptions = {}) {
       signal: options.signal ?? controller.signal,
     })
     const text = await response.text()
-    const payload: { code: number; message: string; traceId?: string; data: T } | null = text ? JSON.parse(text) : null
+    const payload: { code: number; message: string; traceId?: string; data: T } | null = text
+      ? JSON.parse(text)
+      : null
+    const responseTraceId = response.headers.get('X-Trace-Id') || payload?.traceId || traceId
+
+    setLastTraceId(responseTraceId)
 
     if (!response.ok) {
       throw new ApiRequestError(payload?.message || `HTTP ${response.status}`, {
         code: payload?.code,
         status: response.status,
-        traceId: payload?.traceId,
+        traceId: responseTraceId,
       })
     }
 
     if (!payload) {
-      throw new ApiRequestError('后端返回为空', { status: response.status })
+      throw new ApiRequestError('后端返回为空', {
+        status: response.status,
+        traceId: responseTraceId,
+      })
     }
 
     if (typeof payload.code === 'number' && payload.code !== 0) {
       throw new ApiRequestError(payload.message || '接口调用失败', {
         code: payload.code,
         status: response.status,
-        traceId: payload.traceId,
+        traceId: responseTraceId,
       })
     }
 

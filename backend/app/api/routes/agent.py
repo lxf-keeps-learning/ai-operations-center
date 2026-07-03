@@ -12,13 +12,13 @@ router = APIRouter()
 @router.post("/chat", response_model=ApiResponse[AgentTaskResponse], summary="AI 对话")
 async def chat(payload: ChatRequest) -> ApiResponse[AgentTaskResponse]:
     task = agent_service.create_chat_task(payload)
-    return ApiResponse(message="success", traceId=task.trace_id, data=task.to_response())
+    return ApiResponse(data=task.to_response())
 
 
 @router.post("/analyze", response_model=ApiResponse[AgentTaskResponse], summary="AI 分析")
 async def analyze(payload: AnalyzeRequest) -> ApiResponse[AgentTaskResponse]:
     task = agent_service.create_analyze_task(payload)
-    return ApiResponse(message="success", traceId=task.trace_id, data=task.to_response())
+    return ApiResponse(data=task.to_response())
 
 
 @router.get(

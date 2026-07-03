@@ -10,4 +10,4 @@ router = APIRouter()
 @router.post("", response_model=ApiResponse[FeedbackResponse], summary="提交用户反馈")
 async def submit_feedback(payload: FeedbackRequest) -> ApiResponse[FeedbackResponse]:
     feedback = agent_service.create_feedback(payload)
-    return ApiResponse(message="success", traceId=payload.trace_id, data=feedback)
+    return ApiResponse(data=feedback)
