@@ -10,7 +10,7 @@ type RightGroupKey = 'business' | 'capability'
 type RightTabKey = 'credential' | 'analysis' | 'iot'
 
 const appStore = useAppStore()
-const activeDomain = ref<DomainKey>('maintenance')
+const activeDomain = ref<DomainKey>('safety')
 const timeDimension = ref('月维度')
 const currentDate = ref('2026-05')
 const currentCategory = ref('全部')

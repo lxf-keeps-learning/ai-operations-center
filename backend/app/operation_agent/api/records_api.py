@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -80,3 +81,19 @@ def get_record_detail(record_id: int, db: Session = Depends(get_db)) -> ApiRespo
         "total_tokens": record.total_tokens,
         "created_at": record.created_at.isoformat() if record.created_at else None,
     })
+
+
+@router.get("/operation/records/{record_id}/download")
+def download_record(record_id: int, db: Session = Depends(get_db)):
+    record = analysis_record_repo.get_by_id(db, record_id)
+    if record is None:
+        return ApiResponse(code=404001, message="记录不存在")
+    filename = f"{record.report_name or '运营分析报告'}.md"
+    content = record.final_answer_markdown or "# 无内容"
+    return PlainTextResponse(
+        content=content,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Type": "text/markdown; charset=utf-8",
+        },
+    )

@@ -3,9 +3,14 @@ import { ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
 const infraOpen = ref(false)
+const operationOpen = ref(false)
 
 function toggleInfra() {
   infraOpen.value = !infraOpen.value
+}
+
+function toggleOperation() {
+  operationOpen.value = !operationOpen.value
 }
 
 const infraLinks = [
@@ -33,7 +38,15 @@ const infraLinks = [
       <nav class="app-nav" aria-label="主导航">
         <RouterLink to="/">运营总览</RouterLink>
         <RouterLink to="/items">数据管理</RouterLink>
-        <RouterLink to="/operation">运营分析</RouterLink>
+        <div class="nav-dropdown">
+          <button class="nav-dropdown__trigger" @click="toggleOperation">
+            运营分析 <span class="nav-dropdown__arrow">{{ operationOpen ? '▲' : '▼' }}</span>
+          </button>
+          <div v-if="operationOpen" class="nav-dropdown__menu" @mouseleave="operationOpen = false">
+            <RouterLink to="/operation" class="nav-dropdown__item" @click="operationOpen = false">AI 智能分析</RouterLink>
+            <RouterLink to="/operation/records" class="nav-dropdown__item" @click="operationOpen = false">分析记录</RouterLink>
+          </div>
+        </div>
         <div class="nav-dropdown">
           <button class="nav-dropdown__trigger" @click="toggleInfra">
             基础设施 <span class="nav-dropdown__arrow">{{ infraOpen ? '▲' : '▼' }}</span>

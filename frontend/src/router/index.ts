@@ -69,6 +69,12 @@ const router = createRouter({
       component: () => import('@/pages/operation/IndexPage.vue'),
       meta: { title: '运营分析 - 智能运营中心' },
     },
+    {
+      path: '/operation/records',
+      name: 'operation-records',
+      component: () => import('@/pages/operation/RecordsPage.vue'),
+      meta: { title: '分析记录 - 智能运营中心' },
+    },
   ],
   scrollBehavior() {
     return { top: 0 }
