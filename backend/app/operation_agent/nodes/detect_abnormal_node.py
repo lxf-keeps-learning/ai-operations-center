@@ -29,11 +29,12 @@ def _detect_metric_abnormal(metric: dict, metrics: list[dict]) -> list[dict]:
     value = metric.get("value")
     unit = metric.get("unit", "")
     status = metric.get("status", "")
+    domain = metric.get("domain", "safety")
 
     if value is None or value == "--":
         return [
             {
-                "domain": "safety",
+                "domain": domain,
                 "metric_code": code,
                 "metric_name": name,
                 "type": "data_missing",
@@ -89,6 +90,84 @@ def _detect_metric_abnormal(metric: dict, metrics: list[dict]) -> list[dict]:
                 message=f"设备可用率 {numeric}{unit}，低于 90%",
                 value=numeric,
                 threshold=90,
+            )
+        )
+
+    if code == "operation_improvement_rate" and numeric < 90:
+        abnormal.append(
+            _threshold_item(
+                metric,
+                severity="warning",
+                message=f"经营改善完成率 {numeric}{unit}，低于目标 90%",
+                value=numeric,
+                threshold=90,
+            )
+        )
+
+    if code == "contract_fulfillment_rate" and numeric < 96:
+        abnormal.append(
+            _threshold_item(
+                metric,
+                severity="warning",
+                message=f"合同履约率 {numeric}{unit}，低于目标 96%",
+                value=numeric,
+                threshold=96,
+            )
+        )
+
+    if code == "low_score_customer_count" and numeric > 0:
+        abnormal.append(
+            _threshold_item(
+                metric,
+                severity="warning",
+                message=f"存在 {int(numeric)} 户低评分客户，需要跟进服务体验",
+                value=numeric,
+                threshold=0,
+            )
+        )
+
+    if code == "personnel_certificate_rate" and numeric < 100:
+        severity = "high" if numeric < 80 else "warning"
+        abnormal.append(
+            _threshold_item(
+                metric,
+                severity=severity,
+                message=f"人员持证上岗率 {numeric}{unit}，未达到 100% 要求",
+                value=numeric,
+                threshold=100,
+            )
+        )
+
+    if code == "employee_efficiency" and numeric < 20:
+        abnormal.append(
+            _threshold_item(
+                metric,
+                severity="warning",
+                message=f"人均处理工单 {numeric}{unit}，低于目标 20 单/人",
+                value=numeric,
+                threshold=20,
+            )
+        )
+
+    if code == "iot_online_rate" and numeric < 98:
+        abnormal.append(
+            _threshold_item(
+                metric,
+                severity="warning",
+                message=f"设备在线率 {numeric}{unit}，低于目标 98%",
+                value=numeric,
+                threshold=98,
+            )
+        )
+
+    if code == "uncertified_company_count" and numeric > 0:
+        abnormal.append(
+            _threshold_item(
+                metric,
+                severity="high",
+                message=f"存在 {int(numeric)} 家企业持证未达标，需要专项跟进",
+                value=numeric,
+                threshold=0,
             )
         )
 
@@ -226,7 +305,7 @@ def _threshold_item(
     if threshold is not None:
         evidence_text = f"{evidence_text}, 阈值={threshold}"
     return {
-        "domain": "safety",
+        "domain": metric.get("domain", "safety"),
         "metric_code": metric.get("metric_code", ""),
         "metric_name": name,
         "type": "threshold_exceeded",

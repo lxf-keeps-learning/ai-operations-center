@@ -7,6 +7,7 @@ from app.config.settings import settings
 from app.db.base import Base
 from app.models import SystemItem
 from app.runtime.models import AiConversation, AiSession, AiPrompt, AiTrace, AiFeedback
+from app.operation_agent.models import OperationAnalysisRecord, OperationReportFile, OperationDownloadLog, OperationAiUsageRecord
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.sqlalchemy_database_url)

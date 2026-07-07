@@ -15,7 +15,10 @@ class OperationAnalyzeRequest(BaseModel):
     )
     domain: str = Field(
         default="safety",
-        description="分析领域: safety(本质安全) / maintenance(设备运维) / business(经营改善) / all(全部)",
+        description=(
+            "分析领域: safety(本质安全) / maintenance(设备运维) / "
+            "business(经营改善) / capability(能力提升) / all(全部)"
+        ),
     )
     active_tab: str | None = Field(default=None, description="当前活跃 Tab 名称")
     time_dimension: str = Field(default="month", description="时间维度: day / week / month / quarter / year")

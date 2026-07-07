@@ -131,6 +131,25 @@ class TestOperationGraph:
         assert result is not None
         assert "final_answer" in result
 
+    def test_capability_domain_uses_requested_context(self, fake_operation_llm: None):
+        register_all_tools()
+        state = _safety_state()
+        state["page_context"] = {
+            "domain": "capability",
+            "active_tab": "人员持证",
+            "time_dimension": "month",
+            "date": "2026-07",
+        }
+
+        result = operation_graph.invoke(state)
+        final_answer = result["final_answer"]
+        error_messages = [item.get("message", "") for item in result.get("errors", [])]
+
+        assert "能力提升" in final_answer
+        assert "人员持证" in final_answer
+        assert "人员持证上岗率" in final_answer
+        assert all("暂不支持的领域" not in message for message in error_messages)
+
 
 @pytest.mark.anyio
 async def test_operation_analyze_api_returns_closed_loop_payload(

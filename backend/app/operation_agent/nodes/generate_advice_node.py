@@ -82,10 +82,19 @@ def _fallback_advice(abnormal: list[dict]) -> list[dict]:
             {
                 "title": f"处理 {name} 异常",
                 "priority": "P1" if item.get("severity") in {"critical", "high"} else "P2",
-                "owner_role": "安全运营负责人",
+                "owner_role": _owner_for_domain(item.get("domain", "safety")),
                 "action": f"核查 {name} 对应数据和现场记录，确认原因并制定整改计划。",
                 "expected_result": f"推动 {name} 完成闭环处置。",
                 "evidence": item.get("evidence", []),
             }
         )
     return items
+
+
+def _owner_for_domain(domain: str) -> str:
+    return {
+        "safety": "安全运营负责人",
+        "maintenance": "设备运维负责人",
+        "business": "经营改善负责人",
+        "capability": "能力提升负责人",
+    }.get(domain, "运营负责人")

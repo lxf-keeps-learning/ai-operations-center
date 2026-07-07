@@ -6,12 +6,74 @@ from app.operation_agent.state import OperationState
 from app.tool_center.core.schemas import BaseToolInput, ToolContext, ToolResult
 from app.tool_center.registry import get_tool
 
-_SUPPORTED_DOMAINS = {"safety", "all"}
+_SUPPORTED_DOMAINS = {"safety", "maintenance", "business", "capability", "all"}
 _QUERY_TOOLS = {
     "kpi": "kpi_query",
     "alarm": "alarm_query",
     "risk": "risk_query",
     "work_order": "work_order_query",
+}
+_DOMAIN_SNAPSHOTS: dict[str, list[dict[str, Any]]] = {
+    "business": [
+        {
+            "metric_code": "operation_improvement_rate",
+            "metric_name": "经营改善完成率",
+            "value": 86.4,
+            "unit": "%",
+            "status": "warning",
+        },
+        {
+            "metric_code": "customer_satisfaction_rate",
+            "metric_name": "客户满意度",
+            "value": 92.3,
+            "unit": "%",
+            "status": "normal",
+        },
+        {
+            "metric_code": "contract_fulfillment_rate",
+            "metric_name": "合同履约率",
+            "value": 95.1,
+            "unit": "%",
+            "status": "warning",
+        },
+        {
+            "metric_code": "low_score_customer_count",
+            "metric_name": "低评分客户数",
+            "value": 3,
+            "unit": "户",
+            "status": "warning",
+        },
+    ],
+    "capability": [
+        {
+            "metric_code": "personnel_certificate_rate",
+            "metric_name": "人员持证上岗率",
+            "value": 30.81,
+            "unit": "%",
+            "status": "critical",
+        },
+        {
+            "metric_code": "employee_efficiency",
+            "metric_name": "人均处理工单",
+            "value": 18.6,
+            "unit": "单/人",
+            "status": "warning",
+        },
+        {
+            "metric_code": "iot_online_rate",
+            "metric_name": "设备在线率",
+            "value": 96.2,
+            "unit": "%",
+            "status": "warning",
+        },
+        {
+            "metric_code": "uncertified_company_count",
+            "metric_name": "持证未达标企业数",
+            "value": 13,
+            "unit": "家",
+            "status": "critical",
+        },
+    ],
 }
 
 
@@ -21,6 +83,8 @@ def query_operation_data_node(state: OperationState) -> OperationState:
 
     if domain not in _SUPPORTED_DOMAINS:
         errors.append({"node": "query_operation_data", "message": f"暂不支持的领域: {domain}"})
+    elif domain in _DOMAIN_SNAPSHOTS:
+        _load_domain_snapshot(state, domain)
     else:
         _query_operation_snapshot(state, errors)
 
@@ -30,6 +94,7 @@ def query_operation_data_node(state: OperationState) -> OperationState:
 
 def _query_operation_snapshot(state: OperationState, errors: list[dict]) -> None:
     raw_data = state.setdefault("raw_data", {})
+    raw_data["domain"] = state.get("page_context", {}).get("domain") or state.get("domain", "safety")
     evidence: list[dict[str, Any]] = []
     context = _tool_context(state)
     filters = _build_tool_filters(state)
@@ -54,6 +119,36 @@ def _query_operation_snapshot(state: OperationState, errors: list[dict]) -> None
 
     state["metrics"] = _build_metrics(raw_data)
     state["evidence"] = [*state.get("evidence", []), *evidence]
+
+
+def _load_domain_snapshot(state: OperationState, domain: str) -> None:
+    raw_data = state.setdefault("raw_data", {})
+    metrics = [
+        {
+            **item,
+            "domain": domain,
+            "source": "mock_ioc_domain_snapshot",
+        }
+        for item in _DOMAIN_SNAPSHOTS[domain]
+    ]
+    raw_data["domain"] = domain
+    raw_data["domain_snapshot"] = {"items": metrics}
+    state["metrics"] = metrics
+    state["evidence"] = [
+        *state.get("evidence", []),
+        *[
+            {
+                "source": "mock_ioc_domain_snapshot",
+                "source_type": "domain_metric",
+                "record_id": item["metric_code"],
+                "description": (
+                    f"领域指标: {item['metric_name']}, 值: {item['value']}{item['unit']}, "
+                    f"状态: {item['status']}"
+                ),
+            }
+            for item in metrics
+        ],
+    ]
 
 
 def _run_tool(
@@ -122,6 +217,11 @@ def _build_tool_filters(state: OperationState) -> dict[str, dict[str, Any]]:
         filters["alarm"]["alarm_type"] = "safety"
         filters["risk"]["department"] = "安全环保部"
         filters["work_order"]["department"] = "安全环保部"
+    elif domain == "maintenance" and not department:
+        filters["kpi"]["department"] = "生产运维部"
+        filters["alarm"]["alarm_type"] = "equipment"
+        filters["risk"]["department"] = "生产运维部"
+        filters["work_order"]["department"] = "生产运维部"
     elif department:
         for item in filters.values():
             item["department"] = department
@@ -153,10 +253,12 @@ def _tool_error_message(result: ToolResult) -> str:
 
 def _build_metrics(raw_data: dict[str, Any]) -> list[dict[str, Any]]:
     metrics = []
+    domain = raw_data.get("domain", "safety")
 
     for item in raw_data.get("kpi_items", []):
         metrics.append(
             {
+                "domain": domain,
                 "metric_code": item.get("metric_code", ""),
                 "metric_name": item.get("metric_name", ""),
                 "value": item.get("value"),
@@ -187,6 +289,7 @@ def _build_metrics(raw_data: dict[str, Any]) -> list[dict[str, Any]]:
                 "条",
                 "warning" if active_alarms else "normal",
                 "alarm_query",
+                domain=domain,
             ),
             _derived_metric(
                 "high_alarm_count",
@@ -195,6 +298,7 @@ def _build_metrics(raw_data: dict[str, Any]) -> list[dict[str, Any]]:
                 "条",
                 "critical" if high_alarms else "normal",
                 "alarm_query",
+                domain=domain,
             ),
             _derived_metric(
                 "pending_risk_count",
@@ -203,6 +307,7 @@ def _build_metrics(raw_data: dict[str, Any]) -> list[dict[str, Any]]:
                 "项",
                 "warning" if pending_risks else "normal",
                 "risk_query",
+                domain=domain,
             ),
             _derived_metric(
                 "pending_work_order_count",
@@ -211,6 +316,7 @@ def _build_metrics(raw_data: dict[str, Any]) -> list[dict[str, Any]]:
                 "张",
                 "warning" if pending_work_orders else "normal",
                 "work_order_query",
+                domain=domain,
             ),
             _derived_metric(
                 "in_progress_work_order_count",
@@ -219,6 +325,7 @@ def _build_metrics(raw_data: dict[str, Any]) -> list[dict[str, Any]]:
                 "张",
                 "normal",
                 "work_order_query",
+                domain=domain,
             ),
         ]
     )
@@ -233,8 +340,10 @@ def _derived_metric(
     unit: str,
     status: str,
     source: str,
+    domain: str = "safety",
 ) -> dict[str, Any]:
     return {
+        "domain": domain,
         "metric_code": code,
         "metric_name": name,
         "value": value,

@@ -12,7 +12,7 @@ State 是 Graph 中所有 Node 之间传递数据的唯一类型。
 from typing import Any, Literal, NotRequired, TypedDict
 
 # ── 类型字面量 ──────────────────────────────────────
-OperationDomain = Literal["safety", "maintenance", "business", "all"]
+OperationDomain = Literal["safety", "maintenance", "business", "capability", "all"]
 TriggerType = Literal["page_load", "tab_analysis", "expert_chat", "scheduled_daily"]
 AnalysisMode = Literal["dashboard_snapshot", "domain_focus", "qa"]
 

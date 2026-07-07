@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { marked } from 'marked'
 
-import { useOperationStore } from '@/stores/operation'
+import type { OperationAnalyzeParams } from '@/api/operation'
+import { buildRequestKey, useOperationStore } from '@/stores/operation'
 
 const store = useOperationStore()
 const route = useRoute()
+const router = useRouter()
 
 const domainLabel: Record<string, string> = {
   safety: '本质安全',
@@ -15,14 +17,81 @@ const domainLabel: Record<string, string> = {
   capability: '能力提升',
 }
 
-const queryDomain = (route.query.domain as string) || 'safety'
-const queryTimeDim = (route.query.time_dimension as string) || '月维度'
-const queryDate = (route.query.date as string) || ''
-const queryCategory = (route.query.category as string) || ''
-const activeDomain = domainLabel[queryDomain] || '本质安全'
-const hasResult = computed(() => store.result !== null)
+const tabLabelByKey: Record<string, Record<string, string>> = {
+  business: {
+    credential: '经营指标',
+    analysis: '客户分析',
+    iot: '履约改善',
+  },
+  capability: {
+    credential: '人员持证',
+    analysis: '人效分析',
+    iot: '物联接入',
+  },
+}
+const timeDimensionApiMap: Record<string, string> = {
+  日维度: 'day',
+  周维度: 'week',
+  月维度: 'month',
+  季维度: 'quarter',
+  年维度: 'year',
+}
+const timeDimensionLabelMap: Record<string, string> = {
+  day: '日维度',
+  week: '周维度',
+  month: '月维度',
+  quarter: '季维度',
+  year: '年维度',
+}
 
-const pageTitle = `${activeDomain} — AI 运营分析诊断`
+const queryDomain = computed(() => {
+  return normalizeDomain(queryValue('domain') || queryValue('panel') || 'safety')
+})
+const queryTimeDim = computed(() => normalizeTimeDimension(queryValue('time_dimension') || 'month'))
+const queryDate = computed(() => queryValue('date'))
+const queryCategory = computed(() => queryValue('category'))
+const queryTabKey = computed(() => queryValue('tab'))
+const activeDomain = computed(() => domainLabel[queryDomain.value] || '本质安全')
+const activeTab = computed(() => {
+  const directTab = queryValue('active_tab')
+  if (directTab) {
+    return directTab
+  }
+
+  const tabKey = queryTabKey.value
+  return tabLabelByKey[queryDomain.value]?.[tabKey] || activeDomain.value
+})
+const analysisParams = computed<OperationAnalyzeParams>(() => ({
+  trigger_type: 'tab_analysis',
+  domain: queryDomain.value,
+  active_tab: activeTab.value,
+  time_dimension: queryTimeDim.value,
+  date: queryDate.value,
+}))
+const analysisKey = computed(() => buildRequestKey(analysisParams.value))
+const hasResult = computed(() => store.result !== null && store.currentKey === analysisKey.value)
+const canDownload = computed(() => hasResult.value && Boolean(store.result?.summary))
+const reportDownloadFilename = computed(() => {
+  const fileDate = queryDate.value || new Date().toISOString().slice(0, 10)
+  return `运营分析报告_${safeFilePart(activeDomain.value)}_${safeFilePart(fileDate)}.md`
+})
+const reportDownloadHref = computed(() => {
+  if (!canDownload.value) {
+    return undefined
+  }
+
+  return `data:text/markdown;charset=utf-8,${encodeURIComponent(reportDownloadContent())}`
+})
+const displayParams = computed(() => {
+  return [
+    activeTab.value,
+    timeDimensionLabel(queryTimeDim.value),
+    queryDate.value,
+    queryCategory.value,
+  ].filter(Boolean)
+})
+
+const pageTitle = computed(() => `${activeDomain.value} — AI 运营分析诊断`)
 
 function renderMarkdown(text: string): string {
   return marked.parse(normalizeReportMarkdown(text), { async: false, gfm: true }) as string
@@ -35,17 +104,105 @@ function normalizeReportMarkdown(text: string): string {
     .replace(/</g, '&lt;')
 }
 
-onMounted(() => {
-  if (!store.result && !store.loading) {
-    store.analyze({
-      trigger_type: 'tab_analysis',
-      domain: queryDomain,
-      active_tab: activeDomain,
-      time_dimension: queryTimeDim,
-      date: queryDate,
-    })
+function startAnalysis() {
+  void store.analyze(analysisParams.value, analysisKey.value)
+}
+
+function reportDownloadContent(): string {
+  if (!store.result) {
+    return ''
   }
-})
+
+  return [
+    store.result.summary,
+    '',
+    `Trace：${store.result.trace_id}`,
+    `状态：${store.result.status}`,
+  ].join('\n')
+}
+
+function guardDownload(event: MouseEvent) {
+  if (!canDownload.value) {
+    event.preventDefault()
+  }
+}
+
+async function ensureRouteAnalysis() {
+  if (store.loading && store.currentKey === analysisKey.value) {
+    return
+  }
+
+  if (store.loading && store.currentKey && store.currentKey !== analysisKey.value) {
+    const ok = window.confirm(
+      '上一份运营分析报告还没有生成完成，是否按当前新条件重新生成？',
+    )
+    if (!ok) {
+      await restoreCurrentAnalysisRoute()
+      return
+    }
+
+    startAnalysis()
+    return
+  }
+
+  if (store.currentKey !== analysisKey.value || !store.result) {
+    startAnalysis()
+  }
+}
+
+async function restoreCurrentAnalysisRoute() {
+  if (!store.currentParams) {
+    return
+  }
+
+  await router.replace({
+    path: '/operation',
+    query: paramsToQuery(store.currentParams),
+  })
+}
+
+function paramsToQuery(params: OperationAnalyzeParams): Record<string, string> {
+  const query: Record<string, string> = {}
+  for (const key of ['domain', 'active_tab', 'time_dimension', 'date'] as const) {
+    const value = params[key]
+    if (value) {
+      query[key] = value
+    }
+  }
+  return query
+}
+
+function queryValue(key: string): string {
+  const value = route.query[key]
+  if (Array.isArray(value)) {
+    return value[0] || ''
+  }
+  return value || ''
+}
+
+function normalizeDomain(value: string): string {
+  return value in domainLabel ? value : 'safety'
+}
+
+function normalizeTimeDimension(value: string): string {
+  return timeDimensionApiMap[value] || value
+}
+
+function timeDimensionLabel(value: string): string {
+  return timeDimensionLabelMap[value] || value
+}
+
+function safeFilePart(value: string): string {
+  return value.replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '') || 'report'
+}
+
+watch(
+  analysisKey,
+  () => {
+    void ensureRouteAnalysis()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -59,19 +216,20 @@ onMounted(() => {
       <button
         class="btn-analyze"
         :disabled="store.loading"
-        @click="store.analyze({
-          trigger_type: 'tab_analysis',
-          domain: queryDomain,
-          active_tab: activeDomain,
-          time_dimension: queryTimeDim,
-          date: queryDate,
-        })"
+        @click="startAnalysis"
       >
         {{ store.loading ? '分析中...' : '分析' }}
       </button>
-      <div v-if="queryDate || queryCategory" class="operation-page__params">
-        <span v-if="queryDate" class="param-tag">{{ queryDate }}</span>
-        <span v-if="queryCategory" class="param-tag">{{ queryCategory }}</span>
+      <button
+        class="btn-download"
+        :disabled="!canDownload"
+        type="button"
+        @click="downloadReport"
+      >
+        一键下载报告
+      </button>
+      <div v-if="displayParams.length" class="operation-page__params">
+        <span v-for="item in displayParams" :key="item" class="param-tag">{{ item }}</span>
       </div>
     </div>
 
@@ -198,9 +356,29 @@ onMounted(() => {
   padding: 0 28px;
 }
 
-.btn-analyze:disabled {
+.btn-download {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  color: var(--color-heading);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 14px;
+  font-weight: 800;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 20px;
+}
+
+.btn-analyze:disabled,
+.btn-download:disabled {
   cursor: wait;
   opacity: 0.6;
+}
+
+.btn-download:disabled {
+  cursor: not-allowed;
 }
 
 .operation-error {

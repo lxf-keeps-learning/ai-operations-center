@@ -1,7 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
-import { analyzeOperation, type OperationResult } from '@/api/operation'
+import {
+  analyzeOperation,
+  type OperationAnalyzeParams,
+  type OperationResult,
+} from '@/api/operation'
 
 const STEPS = [
   '初始化分析环境',
@@ -17,10 +21,14 @@ export const useOperationStore = defineStore('operation', () => {
   const loading = ref(false)
   const error = ref('')
   const currentStep = ref(0)
+  const currentParams = ref<OperationAnalyzeParams | null>(null)
+  const currentKey = ref('')
 
   let stepTimer: ReturnType<typeof setInterval> | null = null
+  let requestSeq = 0
 
   function startStepProgress() {
+    stopStepProgress()
     currentStep.value = 0
     stepTimer = setInterval(() => {
       if (currentStep.value < STEPS.length - 1) {
@@ -36,27 +44,45 @@ export const useOperationStore = defineStore('operation', () => {
     }
   }
 
-  async function analyze(params: {
-    trigger_type?: string
-    domain?: string
-    active_tab?: string
-    time_dimension?: string
-    date?: string
-  }) {
+  function reset() {
+    requestSeq++
+    stopStepProgress()
+    result.value = null
+    loading.value = false
+    error.value = ''
+    currentStep.value = 0
+    currentParams.value = null
+    currentKey.value = ''
+  }
+
+  async function analyze(params: OperationAnalyzeParams, key = buildRequestKey(params)) {
+    const seq = ++requestSeq
+
     loading.value = true
     error.value = ''
     result.value = null
     currentStep.value = 0
+    currentParams.value = { ...params }
+    currentKey.value = key
     startStepProgress()
 
     try {
-      result.value = await analyzeOperation(params)
+      const data = await analyzeOperation(params)
+      if (seq !== requestSeq) {
+        return
+      }
+      result.value = data
       currentStep.value = STEPS.length - 1
     } catch (e) {
+      if (seq !== requestSeq) {
+        return
+      }
       error.value = e instanceof Error ? e.message : '分析请求失败'
     } finally {
-      loading.value = false
-      stopStepProgress()
+      if (seq === requestSeq) {
+        loading.value = false
+        stopStepProgress()
+      }
     }
   }
 
@@ -65,7 +91,22 @@ export const useOperationStore = defineStore('operation', () => {
     loading,
     error,
     currentStep,
+    currentParams,
+    currentKey,
     steps: STEPS,
     analyze,
+    reset,
   }
 })
+
+export function buildRequestKey(params: OperationAnalyzeParams): string {
+  return [
+    params.domain || 'safety',
+    params.active_tab || '',
+    params.time_dimension || 'month',
+    params.date || '',
+    params.company_id || '',
+    params.project_id || '',
+    params.user_question || '',
+  ].join('|')
+}

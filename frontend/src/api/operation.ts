@@ -11,13 +11,18 @@ export interface OperationResult {
   errors: Record<string, unknown>[]
 }
 
-export async function analyzeOperation(params: {
+export interface OperationAnalyzeParams {
   trigger_type?: string
   domain?: string
   active_tab?: string
   time_dimension?: string
   date?: string
-}) {
+  company_id?: string
+  project_id?: string
+  user_question?: string
+}
+
+export async function analyzeOperation(params: OperationAnalyzeParams) {
   return request<OperationResult>('/operation/analyze', {
     method: 'POST',
     body: JSON.stringify(params),

@@ -5,7 +5,8 @@ import { RouterLink } from 'vue-router'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { useAppStore } from '@/stores/app'
 
-type DomainKey = 'safety' | 'maintenance' | 'business' | 'capability'
+type DomainKey = 'safety' | 'maintenance'
+type RightGroupKey = 'business' | 'capability'
 type RightTabKey = 'credential' | 'analysis' | 'iot'
 
 const appStore = useAppStore()
@@ -13,6 +14,7 @@ const activeDomain = ref<DomainKey>('maintenance')
 const timeDimension = ref('月维度')
 const currentDate = ref('2026-05')
 const currentCategory = ref('全部')
+const activeRightGroup = ref<RightGroupKey>('capability')
 const activeRightTab = ref<RightTabKey>('credential')
 
 const domainPanels = {
@@ -48,38 +50,6 @@ const domainPanels = {
       { name: '湖南新奥能源', value: '0条' },
     ],
   },
-  business: {
-    title: '经营改善',
-    filter: '经营指标',
-    metrics: [
-      { label: '营业收入', value: '12.8', unit: '亿', trend: '较上月 +3.2%', tone: 'success' },
-      { label: '利润率', value: '8.6', unit: '%', trend: '较上月 +0.5%', tone: 'success' },
-      { label: '客户满意度', value: '92.3', unit: '%', trend: '较上月 +1.8%', tone: 'success' },
-      { label: '合同履约率', value: '95.1', unit: '%', trend: '较上月 +2.1%', tone: 'success' },
-    ],
-    ranks: [
-      { name: '河北新奥能源', value: '96.2%' },
-      { name: '广东新奥能源', value: '93.8%' },
-      { name: '福建新奥能源', value: '91.5%' },
-      { name: '湖南新奥能源', value: '89.7%' },
-    ],
-  },
-  capability: {
-    title: '能力提升',
-    filter: '培训与认证',
-    metrics: [
-      { label: '缺陷总数', value: '0', unit: '条', trend: '环比上期 -', tone: 'success' },
-      { label: '缺陷处置率', value: '0', unit: '%', trend: '环比上期 -', tone: 'neutral' },
-      { label: '缺陷未处置', value: '0', unit: '条', trend: '环比上期 -', tone: 'success' },
-      { label: '超期未处置', value: '0', unit: '条', trend: '环比上期 -', tone: 'success' },
-    ],
-    ranks: [
-      { name: '河北新奥能源', value: '0条' },
-      { name: '广东新奥能源', value: '0条' },
-      { name: '福建新奥能源', value: '0条' },
-      { name: '湖南新奥能源', value: '0条' },
-    ],
-  },
 }
 
 const topIndicators = [
@@ -95,53 +65,111 @@ const mapPoints = [
   { label: '西南', value: '42', x: 37, y: 66, tone: 'warning' },
 ]
 
-const rightTabs = [
-  { key: 'credential', label: '人员持证' },
-  { key: 'analysis', label: '人效分析' },
-  { key: 'iot', label: '物联接入' },
-] as const
+const rightTabsByGroup: Record<RightGroupKey, { key: RightTabKey; label: string }[]> = {
+  business: [
+    { key: 'credential', label: '经营指标' },
+    { key: 'analysis', label: '客户分析' },
+    { key: 'iot', label: '履约改善' },
+  ],
+  capability: [
+    { key: 'credential', label: '人员持证' },
+    { key: 'analysis', label: '人效分析' },
+    { key: 'iot', label: '物联接入' },
+  ],
+}
 
-const rightTabData = {
-  credential: {
-    title: '人员持证上岗率',
-    value: '30.81%',
-    target: '达标值100%',
-    diagnosis: '系统监测到人员持证上岗率 30.81%，其中 13 个企业未达标。',
-    rows: [
-      { name: '广西新奥能源', value: '1.72%', width: 12 },
-      { name: '浙江新奥能源', value: '13.02%', width: 34 },
-      { name: '福建新奥能源', value: '16.96%', width: 44 },
-      { name: '江苏新奥能源', value: '27.71%', width: 72 },
-    ],
+const rightTabData: Record<RightGroupKey, Record<RightTabKey, {
+  title: string
+  value: string
+  target: string
+  diagnosis: string
+  rows: { name: string; value: string; width: number }[]
+}>> = {
+  business: {
+    credential: {
+      title: '经营改善完成率',
+      value: '86.4%',
+      target: '较上月 +3.2%',
+      diagnosis: '经营改善事项整体推进稳定，华东与华南区域贡献较高。',
+      rows: [
+        { name: '河北新奥能源', value: '91.2%', width: 86 },
+        { name: '广东新奥能源', value: '88.6%', width: 80 },
+        { name: '福建新奥能源', value: '83.4%', width: 70 },
+        { name: '湖南新奥能源', value: '79.8%', width: 62 },
+      ],
+    },
+    analysis: {
+      title: '客户满意度',
+      value: '92.3%',
+      target: '较上月 +1.8%',
+      diagnosis: '客户满意度整体处于较好水平，需重点关注低评分企业的服务响应。',
+      rows: [
+        { name: '华东运营区', value: '95.1%', width: 90 },
+        { name: '华南运营区', value: '93.4%', width: 84 },
+        { name: '华北运营区', value: '89.7%', width: 72 },
+        { name: '西南运营区', value: '86.5%', width: 64 },
+      ],
+    },
+    iot: {
+      title: '合同履约率',
+      value: '95.1%',
+      target: '较上月 +2.1%',
+      diagnosis: '合同履约率稳定提升，个别低履约区域需跟进交付节点。',
+      rows: [
+        { name: '能源托管项目', value: '97.2%', width: 92 },
+        { name: '设备维保项目', value: '95.8%', width: 86 },
+        { name: '安全整改项目', value: '92.4%', width: 76 },
+        { name: '数字化接入项目', value: '90.5%', width: 68 },
+      ],
+    },
   },
-  analysis: {
-    title: '人均处理工单',
-    value: '18.6',
-    target: '较上月 +2.4',
-    diagnosis: '华东、华南区域处理效率较高，华北区域仍有排队工单需要关注。',
-    rows: [
-      { name: '华东运营区', value: '24.8', width: 78 },
-      { name: '华南运营区', value: '21.3', width: 68 },
-      { name: '华北运营区', value: '13.9', width: 44 },
-      { name: '西南运营区', value: '11.2', width: 36 },
-    ],
-  },
-  iot: {
-    title: '设备在线率',
-    value: '96.2%',
-    target: '较上月 +1.1%',
-    diagnosis: '核心采集设备整体在线稳定，少量站点存在夜间离线波动。',
-    rows: [
-      { name: '燃气站控设备', value: '98.4%', width: 90 },
-      { name: '安防感知设备', value: '95.7%', width: 76 },
-      { name: '能耗采集设备', value: '94.1%', width: 70 },
-      { name: '边缘网关', value: '92.8%', width: 64 },
-    ],
+  capability: {
+    credential: {
+      title: '人员持证上岗率',
+      value: '30.81%',
+      target: '达标值100%',
+      diagnosis: '系统监测到人员持证上岗率 30.81%，其中 13 个企业未达标。',
+      rows: [
+        { name: '广西新奥能源', value: '1.72%', width: 12 },
+        { name: '浙江新奥能源', value: '13.02%', width: 34 },
+        { name: '福建新奥能源', value: '16.96%', width: 44 },
+        { name: '江苏新奥能源', value: '27.71%', width: 72 },
+      ],
+    },
+    analysis: {
+      title: '人均处理工单',
+      value: '18.6',
+      target: '较上月 +2.4',
+      diagnosis: '华东、华南区域处理效率较高，华北区域仍有排队工单需要关注。',
+      rows: [
+        { name: '华东运营区', value: '24.8', width: 78 },
+        { name: '华南运营区', value: '21.3', width: 68 },
+        { name: '华北运营区', value: '13.9', width: 44 },
+        { name: '西南运营区', value: '11.2', width: 36 },
+      ],
+    },
+    iot: {
+      title: '设备在线率',
+      value: '96.2%',
+      target: '较上月 +1.1%',
+      diagnosis: '核心采集设备整体在线稳定，少量站点存在夜间离线波动。',
+      rows: [
+        { name: '燃气站控设备', value: '98.4%', width: 90 },
+        { name: '安防感知设备', value: '95.7%', width: 76 },
+        { name: '能耗采集设备', value: '94.1%', width: 70 },
+        { name: '边缘网关', value: '92.8%', width: 64 },
+      ],
+    },
   },
 }
 
 const leftPanel = computed(() => domainPanels[activeDomain.value])
-const rightPanel = computed(() => rightTabData[activeRightTab.value])
+const rightTabs = computed(() => rightTabsByGroup[activeRightGroup.value])
+const rightPanel = computed(() => rightTabData[activeRightGroup.value][activeRightTab.value])
+const leftActiveTabLabel = computed(() => leftPanel.value.title)
+const rightActiveTabLabel = computed(() => {
+  return rightTabs.value.find((tab) => tab.key === activeRightTab.value)?.label || rightPanel.value.title
+})
 
 const healthTone = computed(() => {
   if (appStore.apiStatus === 'online') {
@@ -180,6 +208,11 @@ const systemDetails = computed(() => [
   { label: 'Redis', value: appStore.health?.redis || '-' },
   { label: 'LLM', value: appStore.health?.llm || '-' },
 ])
+
+function switchRightGroup(group: RightGroupKey) {
+  activeRightGroup.value = group
+  activeRightTab.value = 'credential'
+}
 
 onMounted(() => {
   void appStore.checkHealth()
@@ -256,6 +289,7 @@ onMounted(() => {
             path: '/operation',
             query: {
               domain: activeDomain,
+              active_tab: leftActiveTabLabel,
               time_dimension: timeDimension,
               date: currentDate,
               category: currentCategory,
@@ -278,11 +312,21 @@ onMounted(() => {
 
           <div class="map-actions">
             <input aria-label="企业筛选" placeholder="全部" />
-            <RouterLink class="mode-button" to="/items">示险</RouterLink>
-            <RouterLink class="mode-button mode-button--active" to="/operation">分析</RouterLink>
-            <button class="icon-button" type="button" :disabled="appStore.loading" @click="appStore.checkHealth">
-              <span aria-hidden="true">i</span>
-            </button>
+            <RouterLink
+              class="mode-button mode-button--active"
+              :to="{
+                path: '/operation',
+                query: {
+                  domain: 'safety',
+                  active_tab: '本质安全',
+                  time_dimension: timeDimension,
+                  date: currentDate,
+                  category: currentCategory,
+                },
+              }"
+            >
+              分析
+            </RouterLink>
           </div>
         </div>
 
@@ -318,8 +362,20 @@ onMounted(() => {
 
       <aside class="side-panel side-panel--right">
         <div class="right-title">
-          <button class="title-tab" type="button">经营改善</button>
-          <button class="title-tab title-tab--active" type="button">能力提升</button>
+          <button
+            :class="['title-tab', { 'title-tab--active': activeRightGroup === 'business' }]"
+            type="button"
+            @click="switchRightGroup('business')"
+          >
+            经营改善
+          </button>
+          <button
+            :class="['title-tab', { 'title-tab--active': activeRightGroup === 'capability' }]"
+            type="button"
+            @click="switchRightGroup('capability')"
+          >
+            能力提升
+          </button>
         </div>
 
         <div class="right-tabs" role="tablist" aria-label="能力提升维度">
@@ -375,6 +431,22 @@ onMounted(() => {
             <span>2025-10</span>
           </div>
         </section>
+
+        <RouterLink
+          class="ai-analysis-btn ai-analysis-btn--right"
+          :to="{
+            path: '/operation',
+            query: {
+              domain: activeRightGroup,
+              active_tab: rightActiveTabLabel,
+              tab: activeRightTab,
+              time_dimension: timeDimension,
+              date: currentDate,
+            },
+          }"
+        >
+          AI 智能分析
+        </RouterLink>
       </aside>
     </section>
   </div>
@@ -404,8 +476,10 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  height: calc(100vh - 112px);
   overflow: hidden;
-  padding: 20px;
+  padding: 20px 20px 76px;
+  position: relative;
 }
 
 .ai-analysis-btn {
@@ -419,10 +493,15 @@ onMounted(() => {
   font-size: 14px;
   font-weight: 800;
   justify-content: center;
+  left: 20px;
   min-height: 40px;
   padding: 0 16px;
+  position: absolute;
+  right: 20px;
+  bottom: 12px;
   text-decoration: none;
   transition: opacity 0.15s;
+  box-shadow: 0 10px 22px rgba(79, 70, 229, 0.28);
 }
 
 .ai-analysis-btn:hover {
@@ -485,8 +564,7 @@ onMounted(() => {
 
 .select-button,
 .selector-button,
-.mode-button,
-.icon-button {
+.mode-button {
   align-items: center;
   background: #f7fbff;
   border: 1px solid #d8e5f2;
@@ -719,16 +797,6 @@ onMounted(() => {
   color: #ffffff;
 }
 
-.icon-button {
-  cursor: pointer;
-  width: 34px;
-}
-
-.icon-button:disabled {
-  cursor: wait;
-  opacity: 0.7;
-}
-
 .map-canvas {
   background:
     linear-gradient(rgba(255, 255, 255, 0.5) 1px, transparent 1px),
@@ -758,7 +826,21 @@ onMounted(() => {
 
 .map-land--eurasia {
   border-radius: 48% 52% 42% 58%;
-  clip-path: polygon(0 52%, 9% 36%, 28% 27%, 40% 8%, 58% 15%, 68% 30%, 86% 28%, 100% 44%, 82% 66%, 64% 61%, 52% 78%, 31% 68%, 18% 76%);
+  clip-path: polygon(
+    0 52%,
+    9% 36%,
+    28% 27%,
+    40% 8%,
+    58% 15%,
+    68% 30%,
+    86% 28%,
+    100% 44%,
+    82% 66%,
+    64% 61%,
+    52% 78%,
+    31% 68%,
+    18% 76%
+  );
   height: 44%;
   left: 7%;
   top: 30%;
@@ -971,6 +1053,11 @@ onMounted(() => {
     grid-template-columns: 1fr;
   }
 
+  .side-panel {
+    height: auto;
+    min-height: 620px;
+  }
+
   .map-canvas {
     min-height: 500px;
   }
@@ -990,7 +1077,13 @@ onMounted(() => {
 
 @media (max-width: 620px) {
   .side-panel {
-    padding: 16px;
+    padding: 16px 16px 72px;
+    min-height: 560px;
+  }
+
+  .ai-analysis-btn {
+    left: 16px;
+    right: 16px;
   }
 
   .filter-row,
@@ -1005,8 +1098,7 @@ onMounted(() => {
   }
 
   .map-actions input,
-  .mode-button,
-  .icon-button {
+  .mode-button {
     width: 100%;
   }
 

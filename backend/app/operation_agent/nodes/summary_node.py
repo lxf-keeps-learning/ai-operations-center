@@ -146,7 +146,8 @@ def _domain_label(domain: str) -> str:
     return {
         "safety": "本质安全",
         "maintenance": "设备运维",
-        "business": "经营分析",
+        "business": "经营改善",
+        "capability": "能力提升",
         "all": "综合运营",
     }.get(domain, domain)
 

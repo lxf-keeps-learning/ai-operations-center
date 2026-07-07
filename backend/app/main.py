@@ -11,6 +11,7 @@ from app.core.logging.logger import setup_logging
 from app.core.middleware.trace_middleware import register_trace_middleware
 from app.runtime.api.router import runtime_router
 from app.operation_agent.api import router as operation_router
+from app.operation_agent.api.records_api import router as operation_records_router
 from app.tools.api import router as tools_router
 from app.tools.register import register_all_tools
 
@@ -47,6 +48,7 @@ def create_app() -> FastAPI:
     app.include_router(runtime_router, prefix=settings.api_v1_prefix)
     app.include_router(tools_router, prefix=settings.api_v1_prefix)
     app.include_router(operation_router, prefix=settings.api_v1_prefix)
+    app.include_router(operation_records_router, prefix=settings.api_v1_prefix)
     app.include_router(cache.router, prefix="/api/cache", tags=["Cache"])
     app.include_router(items.router, prefix=f"{settings.api_v1_prefix}/items", tags=["Items"])
 
