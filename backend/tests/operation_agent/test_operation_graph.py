@@ -3,6 +3,7 @@ import json
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.config.settings import settings
 from app.main import app
 from app.operation_agent.graph import operation_graph
 from app.operation_agent.state import OperationState
@@ -32,7 +33,7 @@ def fake_operation_llm(monkeypatch: pytest.MonkeyPatch) -> None:
         history: list[dict[str, str]] | None = None,
         timeout_seconds: float | None = None,
     ) -> LlmResult:
-        assert timeout_seconds == 4.0
+        assert timeout_seconds == settings.operation_llm_timeout_seconds
         if "请只输出 JSON 数组" in user_message:
             content = json.dumps(
                 [
@@ -158,3 +159,40 @@ async def test_operation_analyze_api_returns_closed_loop_payload(
     assert data["risk_items"]
     assert data["advice_items"]
     assert data["evidence"]
+
+
+def test_operation_llm_failure_reports_deepseek_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_failed_chat(
+        prompt_content: str | None,
+        user_message: str,
+        history: list[dict[str, str]] | None = None,
+        timeout_seconds: float | None = None,
+    ) -> LlmResult:
+        return LlmResult(
+            content="",
+            model="deepseek-chat",
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+            cost_ms=1,
+            success=False,
+            error_message="DeepSeek API 调用超时",
+            system_prompt=prompt_content or "",
+        )
+
+    register_all_tools()
+    monkeypatch.setattr(
+        "app.operation_agent.nodes.analyze_reason_node.llm_client.chat",
+        fake_failed_chat,
+    )
+    monkeypatch.setattr(
+        "app.operation_agent.nodes.generate_advice_node.llm_client.chat",
+        fake_failed_chat,
+    )
+
+    result = operation_graph.invoke(_safety_state())
+    final_answer = result["final_answer"]
+
+    assert "DeepSeek 分析调用触发降级" in final_answer
+    assert "DeepSeek API 调用超时" in final_answer
+    assert "LLM 暂不可用" not in final_answer

@@ -19,8 +19,16 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     redis_enabled: bool = False
     redis_url: str = "redis://localhost:6379/0"
+    operation_llm_timeout_seconds: float = Field(
+        default=20.0,
+        description="Operation Agent 调用 DeepSeek 生成报告片段的单次超时时间。",
+    )
 
-    model_config = SettingsConfigDict(env_file=find_env_files(), env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=find_env_files(),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     @cached_property
     def cors_origins(self) -> list[str]:

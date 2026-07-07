@@ -1,94 +1,245 @@
-"""
-QueryOperationDataNode — 通过 Tool Center 查询运营数据。
+"""QueryOperationDataNode - query operation data through Tool Center."""
 
-职责：
-1. 根据 page_context 中的 domain 确定查询数据类型。
-2. 通过 Tool Center 的 kpi_query Tool 获取 KPI 指标数据。
-3. 将结果转换为结构化的 metrics 列表，并保留 evidence 链。
-4. 查询失败时不崩溃，将错误写入 state.errors。
+from typing import Any
 
-当前第一版只实现了 safety（本质安全）领域的数据查询。
-后续需要扩展 maintenance、business、all 等领域的查询逻辑。
-
-该节点不调用 LLM，直接调用 Tool Center 的 Query Tool。
-"""
 from app.operation_agent.state import OperationState
-from app.tool_center.core.schemas import BaseToolInput
+from app.tool_center.core.schemas import BaseToolInput, ToolContext, ToolResult
 from app.tool_center.registry import get_tool
+
+_SUPPORTED_DOMAINS = {"safety", "all"}
+_QUERY_TOOLS = {
+    "kpi": "kpi_query",
+    "alarm": "alarm_query",
+    "risk": "risk_query",
+    "work_order": "work_order_query",
+}
 
 
 def query_operation_data_node(state: OperationState) -> OperationState:
-    """
-    查询运营数据并写入 state。
-
-    safety 领域：通过 kpi_query Tool 查询 KPI 指标。
-    其他领域：当前写入 error，返回空 metrics。
-    """
     domain = state.get("page_context", {}).get("domain") or state.get("domain", "safety")
     errors: list[dict] = []
 
-    if domain == "safety":
-        _query_safety_data(state, errors)
-    else:
+    if domain not in _SUPPORTED_DOMAINS:
         errors.append({"node": "query_operation_data", "message": f"暂不支持的领域: {domain}"})
+    else:
+        _query_operation_snapshot(state, errors)
 
     state["errors"] = state.get("errors", []) + errors
     return state
 
 
-def _query_safety_data(state: OperationState, errors: list[dict]) -> None:
-    """
-    查询 safety 领域的 KPI 数据。
+def _query_operation_snapshot(state: OperationState, errors: list[dict]) -> None:
+    raw_data = state.setdefault("raw_data", {})
+    evidence: list[dict[str, Any]] = []
+    context = _tool_context(state)
+    filters = _build_tool_filters(state)
 
-    通过 Tool Center 获取 kpi_query Tool，传入页面筛选条件，
-    返回指标数据和 evidence 链。
-    """
-    # 获取 Tool Center 中的 kpi_query Tool（在 main.py 启动时已注册）
+    tool_data: dict[str, dict[str, Any]] = {}
+    for key, tool_name in _QUERY_TOOLS.items():
+        result = _run_tool(tool_name, filters.get(key, {}), context, errors)
+        if not result or not result.success:
+            continue
+
+        data = result.data if isinstance(result.data, dict) else {}
+        tool_data[key] = data
+        raw_data[key] = data
+        raw_data[f"{key}_items"] = data.get("items", [])
+        evidence.extend(_serialize_evidence(result, tool_name))
+
+    if tool_data:
+        summary = _run_summary_tool(tool_data, context, errors)
+        if summary and summary.success and isinstance(summary.data, dict):
+            raw_data["ioc_summary"] = summary.data
+            evidence.extend(_serialize_evidence(summary, "ioc_summary_analysis"))
+
+    state["metrics"] = _build_metrics(raw_data)
+    state["evidence"] = [*state.get("evidence", []), *evidence]
+
+
+def _run_tool(
+    tool_name: str,
+    filters: dict[str, Any],
+    context: ToolContext,
+    errors: list[dict],
+) -> ToolResult | None:
     try:
-        kpi_tool = get_tool("kpi_query")
+        tool = get_tool(tool_name)
     except Exception as e:
-        errors.append({"node": "query_operation_data", "message": f"获取 kpi_query Tool 失败: {e}"})
-        return
+        errors.append({"node": "query_operation_data", "message": f"获取 {tool_name} Tool 失败: {e}"})
+        return None
 
-    # 从页面上下文构建过滤条件
+    try:
+        result = tool.run(BaseToolInput(context=context, filters=filters))
+        if not result.success:
+            errors.append(
+                {
+                    "node": "query_operation_data",
+                    "message": f"{tool_name} 调用失败: {_tool_error_message(result)}",
+                }
+            )
+        return result
+    except Exception as e:
+        errors.append({"node": "query_operation_data", "message": f"{tool_name} 调用异常: {e}"})
+        return None
+
+
+def _run_summary_tool(
+    tool_data: dict[str, dict[str, Any]],
+    context: ToolContext,
+    errors: list[dict],
+) -> ToolResult | None:
+    return _run_tool(
+        "ioc_summary_analysis",
+        {
+            "kpi_data": tool_data.get("kpi", {}),
+            "alarm_data": tool_data.get("alarm", {}),
+            "risk_data": tool_data.get("risk", {}),
+            "work_order_data": tool_data.get("work_order", {}),
+        },
+        context,
+        errors,
+    )
+
+
+def _tool_context(state: OperationState) -> ToolContext:
+    user_context = state.get("user_context", {})
+    return ToolContext(
+        user_id=user_context.get("user_id") or user_context.get("userId"),
+        tenant_id=user_context.get("tenant_id") or user_context.get("tenantId"),
+        role=user_context.get("role"),
+        request_id=state.get("trace_id"),
+    )
+
+
+def _build_tool_filters(state: OperationState) -> dict[str, dict[str, Any]]:
     page = state.get("page_context", {})
-    filters = {}
-    if page.get("department"):
-        filters["department"] = page["department"]
-    if page.get("date"):
-        filters["time_range"] = "today"
+    domain = page.get("domain") or state.get("domain", "safety")
+    department = page.get("department")
+    filters: dict[str, dict[str, Any]] = {key: {} for key in _QUERY_TOOLS}
 
-    # 调用 Tool Center 的 KPI Query Tool
-    try:
-        kpi_result = kpi_tool.run(BaseToolInput(filters=filters))
-        if not kpi_result.success:
-            errors.append({"node": "query_operation_data", "message": f"KPI 查询失败: {kpi_result.error}"})
-            return
-    except Exception as e:
-        errors.append({"node": "query_operation_data", "message": f"KPI 查询异常: {e}"})
-        return
+    if domain == "safety" and not department:
+        filters["kpi"]["department"] = "安全环保部"
+        filters["alarm"]["alarm_type"] = "safety"
+        filters["risk"]["department"] = "安全环保部"
+        filters["work_order"]["department"] = "安全环保部"
+    elif department:
+        for item in filters.values():
+            item["department"] = department
 
-    # 将 ToolResult 转换为 metrics 列表
-    items = kpi_result.data.get("items", []) if kpi_result.data else []
+    time_range = page.get("time_range")
+    if time_range in {"today", "yesterday"}:
+        filters["kpi"]["time_range"] = time_range
+    elif page.get("time_dimension") == "day":
+        filters["kpi"]["time_range"] = "today"
+
+    return filters
+
+
+def _serialize_evidence(result: ToolResult, tool_name: str) -> list[dict[str, Any]]:
+    serialized = []
+    for ev in result.evidence:
+        payload = ev.model_dump()
+        payload["tool_name"] = tool_name
+        payload["tool_trace_id"] = result.trace_id
+        serialized.append(payload)
+    return serialized
+
+
+def _tool_error_message(result: ToolResult) -> str:
+    if result.error:
+        return f"{result.error.code}: {result.error.message}"
+    return "未知 Tool 错误"
+
+
+def _build_metrics(raw_data: dict[str, Any]) -> list[dict[str, Any]]:
     metrics = []
-    evidence = []
-    for item in items:
-        metrics.append({
-            "metric_code": item.get("metric_code", ""),
-            "metric_name": item.get("metric_name", ""),
-            "value": item.get("value"),
-            "unit": item.get("unit", ""),
-            "status": item.get("status", ""),
-        })
-    # 保留 Tool Center 返回的 evidence 链
-    for ev in kpi_result.evidence:
-        evidence.append({
-            "source": ev.source,
-            "source_type": ev.source_type,
-            "record_id": ev.record_id,
-            "description": ev.description,
-        })
 
-    state["raw_data"]["kpi_items"] = items
-    state["metrics"] = metrics
-    state["evidence"] = evidence
+    for item in raw_data.get("kpi_items", []):
+        metrics.append(
+            {
+                "metric_code": item.get("metric_code", ""),
+                "metric_name": item.get("metric_name", ""),
+                "value": item.get("value"),
+                "unit": item.get("unit", ""),
+                "status": item.get("status", ""),
+                "department": item.get("department"),
+                "time_range": item.get("time_range"),
+                "source": "kpi_query",
+            }
+        )
+
+    alarms = raw_data.get("alarm_items", [])
+    risks = raw_data.get("risk_items", [])
+    work_orders = raw_data.get("work_order_items", [])
+
+    active_alarms = [a for a in alarms if a.get("status") in {"open", "processing"}]
+    high_alarms = [a for a in active_alarms if a.get("alarm_level") in {"high", "critical"}]
+    pending_risks = [r for r in risks if r.get("status") == "pending"]
+    pending_work_orders = [w for w in work_orders if w.get("status") == "pending"]
+    in_progress_work_orders = [w for w in work_orders if w.get("status") == "in_progress"]
+
+    metrics.extend(
+        [
+            _derived_metric(
+                "active_alarm_count",
+                "未闭环告警数",
+                len(active_alarms),
+                "条",
+                "warning" if active_alarms else "normal",
+                "alarm_query",
+            ),
+            _derived_metric(
+                "high_alarm_count",
+                "高等级未闭环告警数",
+                len(high_alarms),
+                "条",
+                "critical" if high_alarms else "normal",
+                "alarm_query",
+            ),
+            _derived_metric(
+                "pending_risk_count",
+                "待整改隐患数",
+                len(pending_risks),
+                "项",
+                "warning" if pending_risks else "normal",
+                "risk_query",
+            ),
+            _derived_metric(
+                "pending_work_order_count",
+                "待处理工单数",
+                len(pending_work_orders),
+                "张",
+                "warning" if pending_work_orders else "normal",
+                "work_order_query",
+            ),
+            _derived_metric(
+                "in_progress_work_order_count",
+                "处理中工单数",
+                len(in_progress_work_orders),
+                "张",
+                "normal",
+                "work_order_query",
+            ),
+        ]
+    )
+
+    return metrics
+
+
+def _derived_metric(
+    code: str,
+    name: str,
+    value: int,
+    unit: str,
+    status: str,
+    source: str,
+) -> dict[str, Any]:
+    return {
+        "metric_code": code,
+        "metric_name": name,
+        "value": value,
+        "unit": unit,
+        "status": status,
+        "source": source,
+        "derived": True,
+    }

@@ -1,53 +1,112 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 
-import { createOperationAnalyzePayload } from '@/adapters/operationContext'
-import RuntimeChatPanel from '@/components/RuntimeChatPanel.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { useAppStore } from '@/stores/app'
-import type { AgentAnalyzeRequest } from '@/types/api'
+
+type DomainKey = 'safety' | 'maintenance'
+type RightTabKey = 'credential' | 'analysis' | 'iot'
 
 const appStore = useAppStore()
-const analyzePayload = ref<AgentAnalyzeRequest>(createOperationAnalyzePayload())
+const activeDomain = ref<DomainKey>('maintenance')
+const activeRightTab = ref<RightTabKey>('credential')
 
-const capabilityCards = [
-  {
-    title: '运营分析',
-    desc: '汇总 KPI、告警、工单和能耗上下文，输出异常原因和关注优先级。',
-    meta: 'Operation Agent',
+const domainPanels = {
+  safety: {
+    title: '本质安全',
+    filter: '告警与隐患',
+    metrics: [
+      { label: '告警总数', value: '27', unit: '条', trend: '较上月 -12%', tone: 'warning' },
+      { label: '待处理隐患', value: '2', unit: '项', trend: '较上月 -1', tone: 'danger' },
+      { label: '高等级未闭环', value: '1', unit: '条', trend: '需跟进', tone: 'danger' },
+      { label: '工单闭环率', value: '88.7', unit: '%', trend: '较上月 +4.2%', tone: 'success' },
+    ],
+    ranks: [
+      { name: '河北新奥能源', value: '7条' },
+      { name: '广东新奥能源', value: '5条' },
+      { name: '福建新奥能源', value: '3条' },
+      { name: '湖南新奥能源', value: '2条' },
+    ],
   },
-  {
-    title: '隐患研判',
-    desc: '围绕隐患对象生成风险评级、整改建议和可追踪分析依据。',
-    meta: 'HiddenRisk Agent',
+  maintenance: {
+    title: '设备运维',
+    filter: '设备检维修',
+    metrics: [
+      { label: '缺陷总数', value: '0', unit: '条', trend: '环比上期 -', tone: 'success' },
+      { label: '缺陷处置率', value: '0', unit: '%', trend: '环比上期 -', tone: 'neutral' },
+      { label: '缺陷未处置', value: '0', unit: '条', trend: '环比上期 -', tone: 'success' },
+      { label: '超期未处置', value: '0', unit: '条', trend: '环比上期 -', tone: 'success' },
+    ],
+    ranks: [
+      { name: '河北新奥能源', value: '0条' },
+      { name: '广东新奥能源', value: '0条' },
+      { name: '福建新奥能源', value: '0条' },
+      { name: '湖南新奥能源', value: '0条' },
+    ],
   },
-  {
-    title: '流式输出',
-    desc: 'REST 创建任务，SSE 渲染 start、progress、token、done 全流程。',
-    meta: 'Runtime SSE',
-  },
+}
+
+const topIndicators = [
+  { label: '安全运行', value: '1272', unit: '天' },
+  { label: '项目总数', value: '0', unit: '个' },
+  { label: '在线企业', value: '5384', unit: '家' },
 ]
 
-const directoryItems = [
-  ['api', 'REST / SSE 接口封装'],
-  ['adapters', '页面上下文适配'],
-  ['components', '公共展示组件'],
-  ['hooks', '组合式复用逻辑'],
-  ['layouts', '应用布局'],
-  ['pages', '路由页面组合'],
-  ['router', '前端路由'],
-  ['stores', 'Pinia 状态'],
-  ['types', 'TypeScript DTO'],
-  ['utils', '通用工具'],
+const mapPoints = [
+  { label: '华北', value: '58', x: 18, y: 28, tone: 'normal' },
+  { label: '华东集群', value: '5384', x: 48, y: 64, tone: 'active' },
+  { label: '华南', value: '126', x: 55, y: 72, tone: 'success' },
+  { label: '西南', value: '42', x: 37, y: 66, tone: 'warning' },
 ]
 
-const apiItems = [
-  ['GET', '/api/v1/health', '服务健康检查'],
-  ['POST', '/api/v1/agent/analyze', '发起 AI 分析'],
-  ['GET', '/api/v1/agent/stream', '订阅 SSE 输出'],
-  ['GET', '/api/v1/conversations', '查询会话列表'],
-  ['POST', '/api/v1/feedback', '提交用户反馈'],
-]
+const rightTabs = [
+  { key: 'credential', label: '人员持证' },
+  { key: 'analysis', label: '人效分析' },
+  { key: 'iot', label: '物联接入' },
+] as const
+
+const rightTabData = {
+  credential: {
+    title: '人员持证上岗率',
+    value: '30.81%',
+    target: '达标值100%',
+    diagnosis: '系统监测到人员持证上岗率 30.81%，其中 13 个企业未达标。',
+    rows: [
+      { name: '广西新奥能源', value: '1.72%', width: 12 },
+      { name: '浙江新奥能源', value: '13.02%', width: 34 },
+      { name: '福建新奥能源', value: '16.96%', width: 44 },
+      { name: '江苏新奥能源', value: '27.71%', width: 72 },
+    ],
+  },
+  analysis: {
+    title: '人均处理工单',
+    value: '18.6',
+    target: '较上月 +2.4',
+    diagnosis: '华东、华南区域处理效率较高，华北区域仍有排队工单需要关注。',
+    rows: [
+      { name: '华东运营区', value: '24.8', width: 78 },
+      { name: '华南运营区', value: '21.3', width: 68 },
+      { name: '华北运营区', value: '13.9', width: 44 },
+      { name: '西南运营区', value: '11.2', width: 36 },
+    ],
+  },
+  iot: {
+    title: '设备在线率',
+    value: '96.2%',
+    target: '较上月 +1.1%',
+    diagnosis: '核心采集设备整体在线稳定，少量站点存在夜间离线波动。',
+    rows: [
+      { name: '燃气站控设备', value: '98.4%', width: 90 },
+      { name: '安防感知设备', value: '95.7%', width: 76 },
+      { name: '能耗采集设备', value: '94.1%', width: 70 },
+      { name: '边缘网关', value: '92.8%', width: 64 },
+    ],
+  },
+}
+
+const leftPanel = computed(() => domainPanels[activeDomain.value])
+const rightPanel = computed(() => rightTabData[activeRightTab.value])
 
 const healthTone = computed(() => {
   if (appStore.apiStatus === 'online') {
@@ -81,27 +140,11 @@ const healthLabel = computed(() => {
   return '等待检测'
 })
 
-const healthDetails = computed(() => {
-  if (!appStore.health) {
-    return [
-      ['Database', '-'],
-      ['Redis', '-'],
-      ['LLM', '-'],
-    ]
-  }
-
-  return [
-    ['Database', appStore.health.database || '-'],
-    ['Redis', appStore.health.redis || '-'],
-    ['LLM', appStore.health.llm || '-'],
-  ]
-})
-
-const payloadText = computed(() => JSON.stringify(analyzePayload.value, null, 2))
-
-function refreshPayload() {
-  analyzePayload.value = createOperationAnalyzePayload()
-}
+const systemDetails = computed(() => [
+  { label: 'Database', value: appStore.health?.database || '-' },
+  { label: 'Redis', value: appStore.health?.redis || '-' },
+  { label: 'LLM', value: appStore.health?.llm || '-' },
+])
 
 onMounted(() => {
   void appStore.checkHealth()
@@ -109,356 +152,801 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="hero">
-    <div class="hero__content">
-      <StatusBadge :tone="healthTone" :label="healthLabel" />
-      <h1>IOC AI Agent 前端工作台</h1>
-      <p>
-        Vue3、Vite、TypeScript 已就位，前端通过统一 API 层连接 FastAPI Runtime，
-        面向运营分析、隐患研判和流式 AI 输出继续扩展。
-      </p>
-      <div class="hero__actions">
-        <button class="button button--primary" type="button" :disabled="appStore.loading" @click="appStore.checkHealth">
-          {{ appStore.loading ? '检测中' : '检测后端' }}
-        </button>
-        <button class="button" type="button" @click="refreshPayload">刷新上下文</button>
-      </div>
-      <p v-if="appStore.errorMessage" class="hero__error">{{ appStore.errorMessage }}</p>
-    </div>
+  <div class="home-dashboard">
+    <section class="dashboard-grid" aria-label="智能运营中心总览">
+      <aside class="side-panel side-panel--left">
+        <div class="domain-tabs" role="tablist" aria-label="运营领域">
+          <button
+            v-for="(panel, key) in domainPanels"
+            :key="key"
+            :class="['domain-tab', { 'domain-tab--active': activeDomain === key }]"
+            type="button"
+            @click="activeDomain = key"
+          >
+            {{ panel.title }}
+          </button>
+        </div>
 
-    <div class="runtime-panel" aria-label="运行状态">
-      <div class="runtime-panel__head">
-        <span>Runtime</span>
-        <strong>{{ appStore.health?.status || 'UNKNOWN' }}</strong>
-      </div>
-      <dl>
-        <template v-for="[name, value] in healthDetails" :key="name">
-          <dt>{{ name }}</dt>
-          <dd>{{ value }}</dd>
-        </template>
-      </dl>
-    </div>
-  </section>
+        <div class="filter-row">
+          <button class="select-button" type="button">月维度</button>
+          <button class="select-button select-button--wide" type="button">2026-05</button>
+        </div>
 
-  <section class="section-grid">
-    <article v-for="card in capabilityCards" :key="card.title" class="capability-card">
-      <span>{{ card.meta }}</span>
-      <h2>{{ card.title }}</h2>
-      <p>{{ card.desc }}</p>
-    </article>
-  </section>
+        <div class="selector-stack">
+          <button class="selector-button" type="button">{{ leftPanel.filter }}</button>
+          <button class="selector-button" type="button">全部企业</button>
+        </div>
 
-  <section class="workspace-grid">
-    <div class="workspace-panel">
-      <div class="panel-title">
-        <span>前端目录</span>
-        <strong>src</strong>
-      </div>
-      <ul class="directory-list">
-        <li v-for="[name, desc] in directoryItems" :key="name">
-          <code>{{ name }}</code>
-          <span>{{ desc }}</span>
-        </li>
-      </ul>
-    </div>
+        <section class="metric-box" aria-label="左侧关键指标">
+          <article
+            v-for="item in leftPanel.metrics"
+            :key="item.label"
+            :class="['metric-row', `metric-row--${item.tone}`]"
+          >
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}<small>{{ item.unit }}</small></strong>
+            <em>{{ item.trend }}</em>
+          </article>
+        </section>
 
-    <div class="workspace-panel">
-      <div class="panel-title">
-        <span>Runtime API</span>
-        <strong>/api/v1</strong>
-      </div>
-      <ul class="api-list">
-        <li v-for="[method, path, desc] in apiItems" :key="path">
-          <b>{{ method }}</b>
-          <code>{{ path }}</code>
-          <span>{{ desc }}</span>
-        </li>
-      </ul>
-    </div>
-  </section>
+        <section class="rank-block" aria-label="企业排行">
+          <h2>{{ leftPanel.metrics[0].label }}</h2>
+          <ol class="rank-list">
+            <li v-for="(item, index) in leftPanel.ranks" :key="item.name">
+              <span>{{ index + 1 }}</span>
+              <b>{{ item.name }}</b>
+              <em>{{ item.value }}</em>
+            </li>
+          </ol>
+        </section>
 
-  <section class="payload-section">
-    <div class="panel-title">
-      <span>页面上下文</span>
-      <strong>Analyze Payload</strong>
-    </div>
-    <pre>{{ payloadText }}</pre>
-  </section>
+        <section class="trend-block" aria-label="趋势图">
+          <h2>{{ leftPanel.metrics[0].label }}</h2>
+          <div class="trend-chart">
+            <span style="height: 18%"></span>
+            <span style="height: 48%"></span>
+            <span style="height: 30%"></span>
+            <span style="height: 64%"></span>
+            <span style="height: 24%"></span>
+          </div>
+          <div class="chart-axis">
+            <span>2026-05-01</span>
+            <span>2026-05-04</span>
+          </div>
+        </section>
+      </aside>
 
-  <section class="chat-section">
-    <RuntimeChatPanel />
-  </section>
+      <main class="map-stage">
+        <div class="map-topbar">
+          <div class="indicator-strip">
+            <div v-for="item in topIndicators" :key="item.label" class="top-indicator">
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+              <em>{{ item.unit }}</em>
+            </div>
+          </div>
+
+          <div class="map-actions">
+            <input aria-label="企业筛选" placeholder="全部" />
+            <RouterLink class="mode-button" to="/items">示险</RouterLink>
+            <RouterLink class="mode-button mode-button--active" to="/operation">分析</RouterLink>
+            <button class="icon-button" type="button" :disabled="appStore.loading" @click="appStore.checkHealth">
+              <span aria-hidden="true">i</span>
+            </button>
+          </div>
+        </div>
+
+        <section class="map-canvas" aria-label="运营地图态势">
+          <div class="map-water"></div>
+          <div class="map-land map-land--eurasia"></div>
+          <div class="map-land map-land--america"></div>
+          <div class="map-land map-land--australia"></div>
+          <div class="map-region">亚洲</div>
+          <div class="map-region map-region--europe">欧洲</div>
+          <div class="map-region map-region--pacific">太平洋</div>
+
+          <div
+            v-for="point in mapPoints"
+            :key="point.label"
+            :class="['map-point', `map-point--${point.tone}`]"
+            :style="{ left: `${point.x}%`, top: `${point.y}%` }"
+          >
+            <strong>{{ point.value }}</strong>
+            <span>{{ point.label }}</span>
+          </div>
+        </section>
+
+        <div class="map-statusbar">
+          <StatusBadge :tone="healthTone" :label="healthLabel" />
+          <div class="system-list">
+            <span v-for="item in systemDetails" :key="item.label">
+              {{ item.label }}：<b>{{ item.value }}</b>
+            </span>
+          </div>
+        </div>
+      </main>
+
+      <aside class="side-panel side-panel--right">
+        <div class="right-title">
+          <button class="title-tab" type="button">经营改善</button>
+          <button class="title-tab title-tab--active" type="button">能力提升</button>
+        </div>
+
+        <div class="right-tabs" role="tablist" aria-label="能力提升维度">
+          <button
+            v-for="tab in rightTabs"
+            :key="tab.key"
+            :class="['right-tab', { 'right-tab--active': activeRightTab === tab.key }]"
+            type="button"
+            @click="activeRightTab = tab.key"
+          >
+            {{ tab.label }}
+          </button>
+        </div>
+
+        <section class="diagnosis-card" aria-label="诊断指标">
+          <div class="diagnosis-main">
+            <span>{{ rightPanel.title }}</span>
+            <strong>{{ rightPanel.value }}</strong>
+            <em>{{ rightPanel.target }}</em>
+          </div>
+          <p>{{ rightPanel.diagnosis }}</p>
+        </section>
+
+        <section class="right-rank" aria-label="能力排行">
+          <h2>{{ rightPanel.title }}</h2>
+          <ol>
+            <li v-for="(row, index) in rightPanel.rows" :key="row.name">
+              <span class="rank-num">{{ index + 1 }}</span>
+              <div class="rank-main">
+                <div>
+                  <b>{{ row.name }}</b>
+                  <em>{{ row.value }}</em>
+                </div>
+                <span class="rank-bar">
+                  <i :style="{ width: `${row.width}%` }"></i>
+                </span>
+              </div>
+            </li>
+          </ol>
+        </section>
+
+        <section class="bar-card" aria-label="月度柱状图">
+          <h2>{{ rightPanel.title }}</h2>
+          <div class="bar-chart">
+            <span style="height: 22%"></span>
+            <span style="height: 16%"></span>
+            <span style="height: 86%"></span>
+            <span style="height: 32%"></span>
+            <span style="height: 82%"></span>
+          </div>
+          <div class="chart-axis">
+            <span>2025-07</span>
+            <span>2025-10</span>
+          </div>
+        </section>
+      </aside>
+    </section>
+  </div>
 </template>
 
 <style scoped>
-.hero {
-  align-items: stretch;
-  display: grid;
-  gap: 24px;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  margin-bottom: 24px;
+.home-dashboard {
+  color: #1c2b3f;
 }
 
-.hero__content {
-  background: #ffffff;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 34px;
-}
-
-.hero h1 {
-  color: var(--color-heading);
-  font-size: clamp(34px, 6vw, 58px);
-  line-height: 1.05;
-  margin: 22px 0 16px;
-  max-width: 760px;
-}
-
-.hero p {
-  color: var(--color-text-muted);
-  font-size: 17px;
-  line-height: 1.8;
-  margin: 0;
-  max-width: 780px;
-}
-
-.hero__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 26px;
-}
-
-.hero__error {
-  color: #b91c1c;
-  font-size: 14px;
-  margin-top: 16px;
-}
-
-.runtime-panel,
-.workspace-panel,
-.payload-section,
-.capability-card {
-  background: #ffffff;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-}
-
-.runtime-panel {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  padding: 26px;
-}
-
-.runtime-panel__head,
-.panel-title {
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.runtime-panel__head span,
-.panel-title span {
-  color: var(--color-text-muted);
-  font-size: 13px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.runtime-panel__head strong,
-.panel-title strong {
-  color: var(--color-heading);
-  font-size: 18px;
-}
-
-.runtime-panel dl {
-  display: grid;
-  gap: 14px;
-  grid-template-columns: 1fr auto;
-  margin: 36px 0 0;
-}
-
-.runtime-panel dt {
-  color: var(--color-text-muted);
-}
-
-.runtime-panel dd {
-  color: var(--color-heading);
-  font-weight: 800;
-  margin: 0;
-}
-
-.section-grid {
+.dashboard-grid {
   display: grid;
   gap: 18px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin-bottom: 24px;
+  grid-template-columns: 380px minmax(520px, 1fr) 380px;
+  min-height: calc(100vh - 112px);
 }
 
-.capability-card {
-  padding: 24px;
-}
-
-.capability-card span {
-  color: #0369a1;
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.capability-card h2 {
-  color: var(--color-heading);
-  font-size: 22px;
-  margin: 12px 0 10px;
-}
-
-.capability-card p {
-  color: var(--color-text-muted);
-  line-height: 1.7;
-  margin: 0;
-}
-
-.workspace-grid {
-  display: grid;
-  gap: 24px;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
-  margin-bottom: 24px;
-}
-
-.workspace-panel {
-  padding: 24px;
-}
-
-.directory-list,
-.api-list {
-  display: grid;
-  gap: 10px;
-  list-style: none;
-  margin: 22px 0 0;
-  padding: 0;
-}
-
-.directory-list li,
-.api-list li {
-  align-items: center;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+.side-panel,
+.map-stage {
+  background: #ffffff;
+  border: 1px solid #dbe8f5;
   border-radius: 8px;
-  display: grid;
-  gap: 12px;
-  min-height: 48px;
-  padding: 10px 12px;
+  box-shadow: 0 12px 28px rgba(24, 70, 128, 0.08);
 }
 
-.directory-list li {
-  grid-template-columns: 96px 1fr;
-}
-
-.api-list li {
-  grid-template-columns: 56px minmax(180px, 1fr) 120px;
-}
-
-.api-list b {
-  color: #047857;
-  font-size: 12px;
-}
-
-code {
-  color: #334155;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 13px;
-}
-
-.directory-list span,
-.api-list span {
-  color: var(--color-text-muted);
-  font-size: 14px;
-}
-
-.payload-section {
-  padding: 24px;
-}
-
-.payload-section pre {
-  background: #101828;
-  border-radius: 8px;
-  color: #e0f2fe;
-  font-size: 13px;
-  line-height: 1.7;
-  margin: 22px 0 0;
-  overflow-x: auto;
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
   padding: 20px;
 }
 
-.button {
+.domain-tabs,
+.right-title,
+.right-tabs {
+  display: grid;
+  gap: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.right-tabs {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.domain-tab,
+.title-tab,
+.right-tab {
+  background: #ffffff;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #42566f;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 800;
+  min-height: 42px;
+}
+
+.right-tab {
+  border: 1px solid #d6e4f2;
+  font-size: 14px;
+  min-height: 34px;
+}
+
+.domain-tab--active,
+.title-tab--active {
+  border-bottom-color: #168cff;
+  color: #0d7de8;
+}
+
+.right-tab--active {
+  background: #168cff;
+  border-color: #168cff;
+  color: #ffffff;
+}
+
+.filter-row,
+.selector-stack {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 90px 1fr;
+}
+
+.selector-stack {
+  grid-template-columns: 1fr 1fr;
+}
+
+.select-button,
+.selector-button,
+.mode-button,
+.icon-button {
+  align-items: center;
+  background: #f7fbff;
+  border: 1px solid #d8e5f2;
+  border-radius: 6px;
+  color: #2f4258;
+  display: inline-flex;
+  font-size: 14px;
+  font-weight: 700;
+  justify-content: center;
+  min-height: 34px;
+  text-decoration: none;
+}
+
+.selector-button {
+  background: #edf5fc;
+  border: none;
+}
+
+.metric-box {
+  border: 1px solid #1388ff;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.metric-row {
+  align-items: center;
+  background: #f8fbff;
+  border: 1px solid #d9e5f0;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr auto 86px;
+  min-height: 40px;
+  padding: 0 12px;
+}
+
+.metric-row + .metric-row {
+  margin-top: 10px;
+}
+
+.metric-row span {
+  color: #53667c;
+  font-size: 14px;
+}
+
+.metric-row strong {
+  color: #12243a;
+  font-size: 18px;
+}
+
+.metric-row small {
+  font-size: 13px;
+  margin-left: 2px;
+}
+
+.metric-row em,
+.diagnosis-main em,
+.rank-list em,
+.rank-main em {
+  color: #8a9aac;
+  font-style: normal;
+  font-size: 12px;
+}
+
+.metric-row--danger {
+  background: #fff7f3;
+}
+
+.metric-row--warning {
+  background: #fffaf0;
+}
+
+.metric-row--success {
+  background: #f1fbf6;
+}
+
+.rank-block h2,
+.trend-block h2,
+.right-rank h2,
+.bar-card h2 {
+  color: #1a2c40;
+  font-size: 15px;
+  margin: 0 0 12px;
+}
+
+.rank-list,
+.right-rank ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.rank-list li {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 24px 1fr auto;
+  min-height: 38px;
+}
+
+.rank-list span,
+.rank-num {
+  align-items: center;
+  background: #248ef2;
+  border-radius: 50%;
+  color: #ffffff;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 800;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+}
+
+.rank-list b,
+.rank-main b {
+  color: #51667d;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trend-block,
+.bar-card {
+  margin-top: auto;
+}
+
+.trend-chart,
+.bar-chart {
+  align-items: end;
+  border-bottom: 1px solid #d8e4f0;
+  border-left: 1px solid #e4edf6;
+  display: flex;
+  gap: 22px;
+  height: 150px;
+  padding: 12px 22px 0;
+}
+
+.trend-chart span,
+.bar-chart span {
+  background: linear-gradient(180deg, #1692ff, #28d2b0);
+  border-radius: 4px 4px 0 0;
+  display: block;
+  width: 18px;
+}
+
+.chart-axis {
+  color: #9aaabc;
+  display: flex;
+  font-size: 12px;
+  justify-content: space-between;
+  padding: 8px 10px 0;
+}
+
+.map-stage {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  overflow: hidden;
+}
+
+.map-topbar,
+.map-statusbar {
   align-items: center;
   background: #ffffff;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 8px;
-  color: var(--color-heading);
-  cursor: pointer;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  min-height: 56px;
+  padding: 10px 16px;
+}
+
+.indicator-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.top-indicator {
+  align-items: center;
   display: inline-flex;
-  font-size: 15px;
+  gap: 8px;
+}
+
+.top-indicator span {
+  color: #127fe4;
+  font-size: 13px;
   font-weight: 800;
-  justify-content: center;
-  min-height: 42px;
-  padding: 0 16px;
 }
 
-.button:hover {
-  border-color: #94a3b8;
+.top-indicator strong {
+  background: #d6edff;
+  border-radius: 6px;
+  color: #167dde;
+  font-size: 28px;
+  line-height: 1;
+  min-width: 34px;
+  padding: 4px 6px;
+  text-align: center;
 }
 
-.button:disabled {
+.top-indicator em {
+  color: #167dde;
+  font-style: normal;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.map-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.map-actions input {
+  border: 1px solid #d8e5f2;
+  border-radius: 6px;
+  color: #4a6078;
+  height: 34px;
+  min-width: 170px;
+  padding: 0 12px;
+}
+
+.mode-button {
+  min-width: 72px;
+}
+
+.mode-button--active {
+  background: #1592ff;
+  border-color: #1592ff;
+  color: #ffffff;
+}
+
+.icon-button {
+  cursor: pointer;
+  width: 34px;
+}
+
+.icon-button:disabled {
   cursor: wait;
   opacity: 0.7;
 }
 
-.button--primary {
-  background: #0f172a;
-  border-color: #0f172a;
-  color: #ffffff;
+.map-canvas {
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.5) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.5) 1px, transparent 1px),
+    #a9c9eb;
+  background-size: 120px 120px, 120px 120px, auto;
+  min-height: 620px;
+  overflow: hidden;
+  position: relative;
+}
+
+.map-water {
+  background: linear-gradient(180deg, rgba(244, 250, 255, 0.85), rgba(169, 201, 235, 0.12));
+  height: 34%;
+  left: 0;
+  position: absolute;
+  top: 0;
+  width: 100%;
+}
+
+.map-land {
+  background: #eef6ff;
+  border: 1px solid rgba(119, 160, 210, 0.28);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.48);
+  position: absolute;
+}
+
+.map-land--eurasia {
+  border-radius: 48% 52% 42% 58%;
+  clip-path: polygon(0 52%, 9% 36%, 28% 27%, 40% 8%, 58% 15%, 68% 30%, 86% 28%, 100% 44%, 82% 66%, 64% 61%, 52% 78%, 31% 68%, 18% 76%);
+  height: 44%;
+  left: 7%;
+  top: 30%;
+  width: 72%;
+}
+
+.map-land--america {
+  border-radius: 62% 38% 48% 52%;
+  clip-path: polygon(38% 0, 76% 11%, 92% 36%, 72% 64%, 84% 94%, 49% 86%, 28% 62%, 12% 34%);
+  height: 46%;
+  right: -4%;
+  top: 28%;
+  width: 24%;
+}
+
+.map-land--australia {
+  border-radius: 42% 58% 55% 45%;
+  height: 9%;
+  left: 62%;
+  top: 76%;
+  transform: rotate(-8deg);
+  width: 16%;
+}
+
+.map-region {
+  color: #102c4f;
+  font-size: 24px;
+  font-weight: 700;
+  left: 38%;
+  position: absolute;
+  top: 53%;
+}
+
+.map-region--europe {
+  font-size: 18px;
+  left: 14%;
+  top: 50%;
+}
+
+.map-region--pacific {
+  color: #0c65b0;
+  font-size: 14px;
+  left: 74%;
+  top: 68%;
+}
+
+.map-point {
+  align-items: center;
+  background: #ffffff;
+  border: 2px solid #158bff;
+  border-radius: 999px;
+  color: #1483ef;
+  display: inline-flex;
+  flex-direction: column;
+  height: 54px;
+  justify-content: center;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 54px;
+}
+
+.map-point strong {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.map-point span {
+  color: #0f5598;
+  font-size: 12px;
+  left: 50%;
+  position: absolute;
+  top: 58px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.map-point--active {
+  height: 64px;
+  width: 64px;
+}
+
+.map-point--active strong {
+  font-size: 20px;
+}
+
+.map-point--success {
+  border-color: #22b98a;
+  color: #0f9f76;
+}
+
+.map-point--warning {
+  border-color: #f59e0b;
+  color: #d97706;
+}
+
+.map-statusbar {
+  border-top: 1px solid #dbe8f5;
+}
+
+.system-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: flex-end;
+}
+
+.system-list span {
+  color: #66788d;
+  font-size: 13px;
+}
+
+.system-list b {
+  color: #1b2e43;
+}
+
+.right-title {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.diagnosis-card {
+  background: #eef8ff;
+  border: 1px solid #91caff;
+  border-radius: 6px;
+  padding: 14px;
+}
+
+.diagnosis-main {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #148cff;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr auto 90px;
+  min-height: 42px;
+  padding: 0 10px;
+}
+
+.diagnosis-main span {
+  color: #60748b;
+  font-size: 14px;
+}
+
+.diagnosis-main strong {
+  color: #1f2f43;
+  font-size: 18px;
+}
+
+.diagnosis-card p {
+  color: #314b65;
+  font-size: 14px;
+  line-height: 1.8;
+  margin: 14px 0 0;
+}
+
+.right-rank ol {
+  display: grid;
+  gap: 14px;
+}
+
+.right-rank li {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 24px 1fr;
+}
+
+.rank-main {
+  min-width: 0;
+}
+
+.rank-main div {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.rank-bar {
+  background: #edf3f8;
+  border-radius: 999px;
+  display: block;
+  height: 6px;
+  margin-top: 7px;
+  overflow: hidden;
+}
+
+.rank-bar i {
+  background: linear-gradient(90deg, #28d7b0, #1592ff);
+  display: block;
+  height: 100%;
+}
+
+.bar-card {
+  border-top: 1px solid #e3edf7;
+  padding-top: 16px;
+}
+
+@media (max-width: 1360px) {
+  .dashboard-grid {
+    grid-template-columns: 340px minmax(460px, 1fr);
+  }
+
+  .side-panel--right {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 980px) {
-  .hero,
-  .workspace-grid,
-  .section-grid {
+  .dashboard-grid {
     grid-template-columns: 1fr;
   }
 
-  .api-list li {
-    align-items: flex-start;
-    grid-template-columns: 56px 1fr;
+  .map-canvas {
+    min-height: 500px;
   }
 
-  .api-list span {
-    grid-column: 2;
+  .map-topbar,
+  .map-statusbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .map-actions,
+  .system-list {
+    justify-content: flex-start;
+    width: 100%;
   }
 }
 
-@media (max-width: 560px) {
-  .hero__content,
-  .runtime-panel,
-  .workspace-panel,
-  .payload-section,
-  .capability-card {
-    padding: 20px;
+@media (max-width: 620px) {
+  .side-panel {
+    padding: 16px;
   }
 
-  .hero h1 {
-    font-size: 36px;
-  }
-
-  .directory-list li {
-    align-items: flex-start;
+  .filter-row,
+  .selector-stack,
+  .diagnosis-main {
     grid-template-columns: 1fr;
   }
-}
 
-.chat-section {
-  margin-top: 24px;
+  .map-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .map-actions input,
+  .mode-button,
+  .icon-button {
+    width: 100%;
+  }
+
+  .metric-row {
+    align-items: flex-start;
+    grid-template-columns: 1fr;
+    padding: 10px 12px;
+  }
+
+  .top-indicator strong {
+    font-size: 22px;
+  }
 }
 </style>

@@ -1,119 +1,15 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
+import { marked } from 'marked'
 
-import { analyzeOperation, type OperationResult } from '@/api/operation'
+import { useOperationStore } from '@/stores/operation'
 
-const loading = ref(false)
-const result = ref<OperationResult | null>(null)
-const error = ref('')
-const renderedSummary = computed(() => renderOperationMarkdown(result.value?.summary ?? ''))
+const store = useOperationStore()
 
-async function handleAnalyze() {
-  loading.value = true
-  error.value = ''
-  result.value = null
-  try {
-    result.value = await analyzeOperation({
-      trigger_type: 'tab_analysis',
-      domain: 'safety',
-      active_tab: '本质安全',
-      time_dimension: 'month',
-      date: '2026-07',
-    })
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '分析请求失败'
-  } finally {
-    loading.value = false
-  }
-}
+const hasResult = computed(() => store.result !== null)
 
-function renderOperationMarkdown(markdown: string) {
-  const lines = markdown.split('\n')
-  const html: string[] = []
-  let tableRows: string[][] = []
-  let listOpen = false
-
-  function closeList() {
-    if (listOpen) {
-      html.push('</ul>')
-      listOpen = false
-    }
-  }
-
-  function flushTable() {
-    if (!tableRows.length) {
-      return
-    }
-    closeList()
-    const [head, ...body] = tableRows
-    html.push('<table><thead><tr>')
-    head.forEach((cell) => html.push(`<th>${renderInline(cell)}</th>`))
-    html.push('</tr></thead><tbody>')
-    body.forEach((row) => {
-      html.push('<tr>')
-      row.forEach((cell) => html.push(`<td>${renderInline(cell)}</td>`))
-      html.push('</tr>')
-    })
-    html.push('</tbody></table>')
-    tableRows = []
-  }
-
-  lines.forEach((line) => {
-    const trimmed = line.trim()
-    if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
-      if (!trimmed.includes('---')) {
-        tableRows.push(trimmed.slice(1, -1).split('|').map((cell) => cell.trim()))
-      }
-      return
-    }
-
-    flushTable()
-
-    if (!trimmed) {
-      closeList()
-      return
-    }
-
-    if (trimmed.startsWith('#### ')) {
-      closeList()
-      html.push(`<h4>${renderInline(trimmed.slice(5))}</h4>`)
-    } else if (trimmed.startsWith('### ')) {
-      closeList()
-      html.push(`<h3>${renderInline(trimmed.slice(4))}</h3>`)
-    } else if (trimmed.startsWith('## ')) {
-      closeList()
-      html.push(`<h2>${renderInline(trimmed.slice(3))}</h2>`)
-    } else if (trimmed.startsWith('> ')) {
-      closeList()
-      html.push(`<blockquote>${renderInline(trimmed.slice(2))}</blockquote>`)
-    } else if (trimmed.startsWith('- ')) {
-      if (!listOpen) {
-        html.push('<ul>')
-        listOpen = true
-      }
-      html.push(`<li>${renderInline(trimmed.slice(2))}</li>`)
-    } else {
-      closeList()
-      html.push(`<p>${renderInline(trimmed)}</p>`)
-    }
-  })
-
-  flushTable()
-  closeList()
-  return html.join('')
-}
-
-function renderInline(value: string) {
-  return escapeHtml(value).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
+function renderMarkdown(text: string): string {
+  return marked.parse(text, { async: false }) as string
 }
 </script>
 
@@ -125,53 +21,77 @@ function escapeHtml(value: string) {
     </div>
 
     <div class="operation-page__actions">
-      <button class="btn-analyze" :disabled="loading" @click="handleAnalyze">
-        {{ loading ? '分析中...' : '分析' }}
+      <button
+        class="btn-analyze"
+        :disabled="store.loading"
+        @click="store.analyze({
+          trigger_type: 'tab_analysis',
+          domain: 'safety',
+          active_tab: '本质安全',
+          time_dimension: 'month',
+          date: '2026-07',
+        })"
+      >
+        {{ store.loading ? '分析中...' : '分析' }}
       </button>
     </div>
 
-    <p v-if="error" class="operation-error">{{ error }}</p>
+    <p v-if="store.error" class="operation-error">{{ store.error }}</p>
 
-    <div v-if="loading" class="operation-loading">
-      <p>正在分析运营数据，请稍候...</p>
-    </div>
-
-    <div v-if="result" class="operation-result">
-      <div class="result-section result-section--summary">
-        <h2>AI 运营分析结论</h2>
-        <div class="markdown-content" v-html="renderedSummary"></div>
-      </div>
-
-      <div v-if="result.risk_items.length" class="result-section">
-        <h2>风险排序</h2>
-        <div v-for="(item, i) in result.risk_items" :key="i" class="risk-card">
-          <div class="risk-card__header">
-            <span class="risk-priority">{{ item.priority || item.severity || 'P2' }}</span>
-            <strong>{{ item.title }}</strong>
+    <!-- 分析过程展示 -->
+    <div v-if="store.loading" class="operation-progress">
+      <div class="progress-card">
+        <h3>分析进行中</h3>
+        <div class="step-list">
+          <div
+            v-for="(step, i) in store.steps"
+            :key="i"
+            class="step-item"
+            :class="{
+              'step-item--past': i < store.currentStep,
+              'step-item--current': i === store.currentStep,
+              'step-item--future': i > store.currentStep,
+            }"
+          >
+            <span class="step-icon">
+              <span v-if="i < store.currentStep" class="step-dot step-dot--done">✓</span>
+              <span v-else-if="i === store.currentStep" class="step-dot step-dot--active" />
+              <span v-else class="step-dot step-dot--pending" />
+            </span>
+            <span class="step-label" :class="{ 'step-label--active': i === store.currentStep }">
+              {{ step }}
+            </span>
           </div>
-          <p v-if="item.description" class="risk-card__desc">{{ item.description }}</p>
         </div>
       </div>
+    </div>
 
-      <div v-if="result.advice_items.length" class="result-section">
+    <!-- 分析结果 -->
+      <div v-if="hasResult" class="operation-result">
+      <div class="result-section result-section--summary">
+        <h2>AI 运营分析结论</h2>
+        <div class="markdown-content" v-html="renderMarkdown(store.result!.summary)" />
+      </div>
+
+      <div v-if="store.result!.advice_items.length" class="result-section">
         <h2>建议动作</h2>
-        <div v-for="(item, i) in result.advice_items" :key="i" class="advice-card">
+        <div v-for="(item, i) in store.result!.advice_items" :key="i" class="advice-card">
           <div class="advice-card__header">
-            <span class="advice-priority" :class="`advice-priority--${String(item.priority || 'P2').toLowerCase()}`">
+            <span class="advice-priority" :class="`advice-priority--${(item.priority as string || 'P2').toLowerCase()}`">
               {{ item.priority || 'P2' }}
             </span>
             <strong>{{ item.title }}</strong>
           </div>
           <p class="advice-card__action">{{ item.action }}</p>
-          <p class="advice-card__meta" v-if="item.owner_role">负责人：{{ item.owner_role }}</p>
-          <p class="advice-card__meta" v-if="item.expected_result">预期：{{ item.expected_result }}</p>
+          <p v-if="item.owner_role" class="advice-card__meta">负责人：{{ item.owner_role }}</p>
+          <p v-if="item.expected_result" class="advice-card__meta">预期：{{ item.expected_result }}</p>
         </div>
       </div>
 
-      <div v-if="result.evidence.length" class="result-section">
+      <div v-if="store.result!.evidence.length" class="result-section">
         <h2>数据依据</h2>
         <div class="evidence-list">
-          <div v-for="(ev, i) in result.evidence" :key="i" class="evidence-item">
+          <div v-for="(ev, i) in store.result!.evidence" :key="i" class="evidence-item">
             <span class="evidence-source">{{ ev.source }}</span>
             <span class="evidence-desc">{{ ev.description }}</span>
           </div>
@@ -179,8 +99,8 @@ function escapeHtml(value: string) {
       </div>
 
       <div class="result-meta">
-        <span>状态：{{ result.status }}</span>
-        <span>Trace：<code>{{ result.trace_id }}</code></span>
+        <span>状态：{{ store.result!.status }}</span>
+        <span>Trace：<code>{{ store.result!.trace_id }}</code></span>
       </div>
     </div>
   </div>
@@ -237,13 +157,97 @@ function escapeHtml(value: string) {
   padding: 12px 16px;
 }
 
-.operation-loading {
-  color: var(--color-text-muted);
-  font-size: 15px;
-  padding: 40px 0;
-  text-align: center;
+/* ── 分析进度展示 ── */
+.operation-progress {
+  margin-bottom: 24px;
 }
 
+.progress-card {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 24px;
+}
+
+.progress-card h3 {
+  color: var(--color-heading);
+  font-size: 16px;
+  margin: 0 0 16px;
+}
+
+.step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.step-item {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  min-height: 40px;
+  padding: 6px 0;
+}
+
+.step-icon {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  height: 24px;
+  justify-content: center;
+  width: 24px;
+}
+
+.step-dot {
+  border-radius: 50%;
+  display: block;
+}
+
+.step-dot--done {
+  align-items: center;
+  background: #166534;
+  color: #ffffff;
+  display: flex;
+  font-size: 11px;
+  font-weight: 800;
+  height: 20px;
+  justify-content: center;
+  width: 20px;
+}
+
+.step-dot--active {
+  animation: pulse 1.5s infinite;
+  background: #6366f1;
+  height: 14px;
+  width: 14px;
+}
+
+.step-dot--pending {
+  background: #e2e8f0;
+  height: 10px;
+  width: 10px;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.3); }
+}
+
+.step-label {
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+.step-label--active {
+  color: var(--color-heading);
+  font-weight: 700;
+}
+
+.step-item--past .step-label {
+  color: #166534;
+}
+
+/* ── 结果区域 ── */
 .result-section {
   background: #ffffff;
   border: 1px solid var(--color-border);
@@ -263,92 +267,68 @@ function escapeHtml(value: string) {
   line-height: 1.8;
 }
 
-.markdown-content :deep(h2) {
+.markdown-content h3 {
   color: var(--color-heading);
-  font-size: 18px;
-  margin: 0 0 12px;
+  font-size: 17px;
+  margin: 24px 0 12px;
 }
 
-.markdown-content :deep(h3) {
+.markdown-content h4 {
   color: var(--color-heading);
-  font-size: 16px;
+  font-size: 15px;
   margin: 20px 0 10px;
 }
 
-.markdown-content :deep(h4) {
-  color: var(--color-heading);
-  font-size: 15px;
-  margin: 16px 0 8px;
-}
-
-.markdown-content :deep(p) {
-  margin: 8px 0;
-}
-
-.markdown-content :deep(blockquote) {
-  background: #f8fafc;
-  border-left: 3px solid #64748b;
-  color: var(--color-text-muted);
-  margin: 10px 0;
-  padding: 8px 12px;
-}
-
-.markdown-content :deep(ul) {
-  margin: 8px 0 12px;
-  padding-left: 20px;
-}
-
-.markdown-content :deep(li) {
-  margin: 5px 0;
-}
-
-.markdown-content :deep(table) {
+.markdown-content table {
   border-collapse: collapse;
   font-size: 14px;
   margin: 12px 0;
   width: 100%;
 }
 
-.markdown-content :deep(td),
-.markdown-content :deep(th) {
+.markdown-content td,
+.markdown-content th {
   border: 1px solid #e2e8f0;
   padding: 8px 12px;
   text-align: left;
 }
 
-.markdown-content :deep(th) {
+.markdown-content th {
   background: #f8fafc;
   font-weight: 800;
 }
 
-.risk-card {
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  margin-bottom: 12px;
-  padding: 14px 16px;
+.markdown-content ul,
+.markdown-content ol {
+  margin: 8px 0;
+  padding-left: 24px;
 }
 
-.risk-card__header {
-  align-items: center;
-  display: flex;
-  gap: 10px;
+.markdown-content li {
+  margin: 4px 0;
 }
 
-.risk-priority {
-  background: #fff7ed;
-  border-radius: 4px;
-  color: #9a3412;
-  flex-shrink: 0;
-  font-size: 11px;
+.markdown-content p {
+  margin: 8px 0;
+}
+
+.markdown-content strong {
   font-weight: 800;
-  padding: 2px 8px;
 }
 
-.risk-card__desc {
+.markdown-content code {
+  background: #f1f5f9;
+  border-radius: 4px;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  padding: 2px 6px;
+}
+
+.markdown-content blockquote {
+  border-left: 4px solid #6366f1;
   color: var(--color-text-muted);
-  font-size: 14px;
-  line-height: 1.6;
-  margin: 8px 0 0;
+  margin: 12px 0;
+  padding: 8px 16px;
 }
 
 .advice-card {

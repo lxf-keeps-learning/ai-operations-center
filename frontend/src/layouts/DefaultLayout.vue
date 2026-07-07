@@ -24,14 +24,14 @@ const infraLinks = [
   <div class="app-shell">
     <header class="app-header">
       <RouterLink class="brand" to="/">
-        <span class="brand__mark">AI</span>
+        <span class="brand__mark">IOC</span>
         <span>
           <strong>智能运营中心</strong>
-          <small>Agent Runtime Console</small>
+          <small>AI Operations Center</small>
         </span>
       </RouterLink>
       <nav class="app-nav" aria-label="主导航">
-        <RouterLink to="/">工作台</RouterLink>
+        <RouterLink to="/">运营总览</RouterLink>
         <RouterLink to="/items">数据管理</RouterLink>
         <RouterLink to="/operation">运营分析</RouterLink>
         <div class="nav-dropdown">
@@ -95,7 +95,7 @@ const infraLinks = [
   font-weight: 800;
   height: 36px;
   justify-content: center;
-  width: 36px;
+  width: 42px;
 }
 
 .brand strong,
@@ -122,6 +122,7 @@ const infraLinks = [
   font-weight: 700;
   padding: 10px 12px;
   text-decoration: none;
+  white-space: nowrap;
 }
 
 .app-nav > a.router-link-active {
@@ -142,6 +143,7 @@ const infraLinks = [
   font-size: 14px;
   font-weight: 700;
   padding: 10px 12px;
+  white-space: nowrap;
 }
 
 .nav-dropdown__trigger:hover {
@@ -188,8 +190,8 @@ const infraLinks = [
 
 .app-main {
   margin: 0 auto;
-  max-width: 1240px;
-  padding: 32px;
+  max-width: 1760px;
+  padding: 20px 24px 28px;
 }
 
 @media (max-width: 720px) {
@@ -198,6 +200,13 @@ const infraLinks = [
     flex-direction: column;
     gap: 14px;
     padding: 18px 20px;
+  }
+
+  .app-nav {
+    max-width: 100%;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    width: 100%;
   }
 
   .app-main {

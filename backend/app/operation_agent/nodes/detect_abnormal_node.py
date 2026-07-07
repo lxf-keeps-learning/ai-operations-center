@@ -1,111 +1,281 @@
-"""
-DetectAbnormalNode — 基于规则检测运营异常。
+"""DetectAbnormalNode - rule-based abnormal and risk detection."""
 
-职责：
-1. 遍历 metrics 列表，使用确定性规则判断异常。
-2. 不调用 LLM，不查询数据库。
-3. 输出 abnormal_items 列表，每条异常携带 evidence。
-
-当前支持的规则：
-- 数据缺失：值为 None 或 "--" → data_missing / high
-- 能耗异常：status=warning / critical → threshold_exceeded
-- 告警处理率 < 95% → threshold_exceeded / warning
-- 工单完成率 < 80% → threshold_exceeded / warning
-- 设备可用率 < 90% → threshold_exceeded / high
-
-规则可扩展：后续增加 alarm/risk 数据的异常检测时在此添加规则即可。
-"""
 from app.operation_agent.state import OperationState
+
+_SEVERITY_RANK = {"critical": 0, "high": 1, "warning": 2, "medium": 2, "low": 3}
 
 
 def detect_abnormal_node(state: OperationState) -> OperationState:
-    """检测异常并写入 state.abnormal_items。"""
     metrics = state.get("metrics", [])
+    raw_data = state.get("raw_data", {})
     abnormal: list[dict] = []
 
-    for m in metrics:
-        code = m.get("metric_code", "")
-        name = m.get("metric_name", "")
-        value = m.get("value")
-        unit = m.get("unit", "")
-        status = m.get("status", "")
+    for metric in metrics:
+        abnormal.extend(_detect_metric_abnormal(metric, metrics))
 
-        # ── 规则 1：数据缺失检测 ────────────────────
-        if value is None or value == "--":
-            abnormal.append({
+    abnormal.extend(_detect_alarm_abnormal(raw_data.get("alarm_items", [])))
+    abnormal.extend(_detect_risk_abnormal(raw_data.get("risk_items", [])))
+    abnormal.extend(_detect_work_order_abnormal(raw_data.get("work_order_items", [])))
+
+    abnormal = sorted(abnormal, key=lambda item: _SEVERITY_RANK.get(item.get("severity", ""), 9))
+    state["abnormal_items"] = abnormal
+    state["risk_items"] = _build_risk_items(abnormal)
+    return state
+
+
+def _detect_metric_abnormal(metric: dict, metrics: list[dict]) -> list[dict]:
+    code = metric.get("metric_code", "")
+    name = metric.get("metric_name", "")
+    value = metric.get("value")
+    unit = metric.get("unit", "")
+    status = metric.get("status", "")
+
+    if value is None or value == "--":
+        return [
+            {
+                "domain": "safety",
                 "metric_code": code,
                 "metric_name": name,
                 "type": "data_missing",
                 "severity": "high",
                 "message": f"指标 {name} 数据缺失，值为空",
-                "evidence": [{"source": "rule_based_detection", "description": f"{name} 值为空"}],
-            })
+                "evidence": [_rule_evidence(f"{name} 值为空")],
+            }
+        ]
+
+    numeric = _to_number(value)
+    if numeric is None:
+        return []
+
+    abnormal = []
+
+    if code == "energy_consumption" and status in {"warning", "critical"}:
+        abnormal.append(
+            _threshold_item(
+                metric,
+                severity="high" if status == "critical" else "warning",
+                message=f"{name} ({numeric}{unit}) 状态为 {status}",
+                value=numeric,
+            )
+        )
+
+    if code == "alarm_handling_rate" and numeric < 95 and _has_total_alarms(metrics):
+        abnormal.append(
+            _threshold_item(
+                metric,
+                severity="warning",
+                message=f"告警处理率 {numeric}{unit}，低于阈值 95%",
+                value=numeric,
+                threshold=95,
+            )
+        )
+
+    if code == "work_order_completion_rate" and numeric < 80:
+        abnormal.append(
+            _threshold_item(
+                metric,
+                severity="warning",
+                message=f"工单完成率 {numeric}{unit}，低于 80%",
+                value=numeric,
+                threshold=80,
+            )
+        )
+
+    if code == "equipment_availability" and numeric < 90:
+        abnormal.append(
+            _threshold_item(
+                metric,
+                severity="high",
+                message=f"设备可用率 {numeric}{unit}，低于 90%",
+                value=numeric,
+                threshold=90,
+            )
+        )
+
+    if code == "high_alarm_count" and numeric > 0:
+        abnormal.append(
+            _threshold_item(
+                metric,
+                severity="high",
+                message=f"存在 {int(numeric)} 条高等级未闭环告警",
+                value=numeric,
+                threshold=0,
+            )
+        )
+
+    if code in {"pending_risk_count", "pending_work_order_count"} and numeric > 0:
+        abnormal.append(
+            _threshold_item(
+                metric,
+                severity="warning",
+                message=f"{name} 为 {int(numeric)}{unit}，需要推进闭环",
+                value=numeric,
+                threshold=0,
+            )
+        )
+
+    return abnormal
+
+
+def _detect_alarm_abnormal(alarms: list[dict]) -> list[dict]:
+    abnormal = []
+    for alarm in alarms:
+        level = alarm.get("alarm_level", "")
+        status = alarm.get("status", "")
+        if status == "closed" or level not in {"critical", "high"}:
             continue
+        title = alarm.get("title", "未命名告警")
+        severity = "critical" if level == "critical" else "high"
+        abnormal.append(
+            {
+                "domain": "safety",
+                "metric_code": "alarm",
+                "metric_name": title,
+                "type": "high_level_alarm",
+                "severity": severity,
+                "message": f"{title} 处于 {status} 状态，告警等级为 {level}",
+                "record_id": alarm.get("alarm_id"),
+                "evidence": [
+                    _record_evidence(
+                        source_type="alarm_api",
+                        record_id=alarm.get("alarm_id"),
+                        description=(
+                            f"告警 {alarm.get('alarm_id')}: {title}, "
+                            f"等级={level}, 状态={status}, 部门={alarm.get('department', '')}"
+                        ),
+                    )
+                ],
+            }
+        )
+    return abnormal
 
-        numeric = _to_number(value)
-        if numeric is None:
+
+def _detect_risk_abnormal(risks: list[dict]) -> list[dict]:
+    abnormal = []
+    for risk in risks:
+        level = risk.get("risk_level", "")
+        status = risk.get("status", "")
+        if status != "pending" or level not in {"high", "medium"}:
             continue
+        title = risk.get("title", "未命名隐患")
+        abnormal.append(
+            {
+                "domain": "safety",
+                "metric_code": "risk",
+                "metric_name": title,
+                "type": "pending_risk",
+                "severity": "high" if level == "high" else "warning",
+                "message": f"{title} 待整改，隐患等级为 {level}",
+                "record_id": risk.get("risk_id"),
+                "evidence": [
+                    _record_evidence(
+                        source_type="risk_api",
+                        record_id=risk.get("risk_id"),
+                        description=(
+                            f"隐患 {risk.get('risk_id')}: {title}, "
+                            f"等级={level}, 责任人={risk.get('owner', '')}"
+                        ),
+                    )
+                ],
+            }
+        )
+    return abnormal
 
-        # ── 规则 2：能耗异常（warning / critical） ──
-        if code == "energy_consumption" and status in ("warning", "critical"):
-            abnormal.append({
-                "metric_code": code,
-                "metric_name": name,
-                "type": "threshold_exceeded",
-                "severity": "high" if status == "critical" else "warning",
-                "message": f"{name} ({numeric}{unit}) 状态为 {status}",
-                "value": numeric,
-                "threshold": None,
-                "evidence": [{"source": "rule_based_detection", "description": f"{name} = {numeric}{unit}, 状态={status}"}],
-            })
 
-        # ── 规则 3：告警处理率 < 95% ────────────────
-        if code == "alarm_handling_rate":
-            if numeric < 95 and _has_total_alarms(metrics):
-                abnormal.append({
-                    "metric_code": code,
-                    "metric_name": name,
-                    "type": "threshold_exceeded",
-                    "severity": "warning",
-                    "message": f"告警处理率 {numeric}{unit}，低于阈值 95%",
-                    "value": numeric,
-                    "threshold": 95,
-                    "evidence": [{"source": "rule_based_detection", "description": f"告警处理率 = {numeric}{unit} < 95%"}],
-                })
+def _detect_work_order_abnormal(work_orders: list[dict]) -> list[dict]:
+    abnormal = []
+    for order in work_orders:
+        if order.get("status") != "pending":
+            continue
+        title = order.get("title", "未命名工单")
+        abnormal.append(
+            {
+                "domain": "safety",
+                "metric_code": "work_order",
+                "metric_name": title,
+                "type": "pending_work_order",
+                "severity": "warning",
+                "message": f"{title} 尚未处理，负责人为 {order.get('owner') or '未指定'}",
+                "record_id": order.get("work_order_id"),
+                "evidence": [
+                    _record_evidence(
+                        source_type="work_order_api",
+                        record_id=order.get("work_order_id"),
+                        description=(
+                            f"工单 {order.get('work_order_id')}: {title}, "
+                            f"状态={order.get('status')}, 负责人={order.get('owner', '')}"
+                        ),
+                    )
+                ],
+            }
+        )
+    return abnormal
 
-        # ── 规则 4：工单完成率 < 80% ────────────────
-        if code == "work_order_completion_rate":
-            if numeric < 80:
-                abnormal.append({
-                    "metric_code": code,
-                    "metric_name": name,
-                    "type": "threshold_exceeded",
-                    "severity": "warning",
-                    "message": f"工单完成率 {numeric}{unit}，低于 80%",
-                    "value": numeric,
-                    "threshold": 80,
-                    "evidence": [{"source": "rule_based_detection", "description": f"工单完成率 = {numeric}{unit} < 80%"}],
-                })
 
-        # ── 规则 5：设备可用率 < 90% ────────────────
-        if code == "equipment_availability" and numeric < 90:
-            abnormal.append({
-                "metric_code": code,
-                "metric_name": name,
-                "type": "threshold_exceeded",
-                "severity": "high",
-                "message": f"设备可用率 {numeric}{unit}，低于 90%",
-                "value": numeric,
-                "threshold": 90,
-                "evidence": [{"source": "rule_based_detection", "description": f"设备可用率 = {numeric}{unit} < 90%"}],
-            })
+def _threshold_item(
+    metric: dict,
+    *,
+    severity: str,
+    message: str,
+    value: float,
+    threshold: float | None = None,
+) -> dict:
+    name = metric.get("metric_name", "")
+    unit = metric.get("unit", "")
+    evidence_text = f"{name} = {value}{unit}"
+    if threshold is not None:
+        evidence_text = f"{evidence_text}, 阈值={threshold}"
+    return {
+        "domain": "safety",
+        "metric_code": metric.get("metric_code", ""),
+        "metric_name": name,
+        "type": "threshold_exceeded",
+        "severity": severity,
+        "message": message,
+        "value": value,
+        "threshold": threshold,
+        "evidence": [_rule_evidence(evidence_text)],
+    }
 
-    state["abnormal_items"] = abnormal
-    return state
+
+def _build_risk_items(abnormal: list[dict]) -> list[dict]:
+    risk_items = []
+    for index, item in enumerate(abnormal, start=1):
+        severity = item.get("severity", "warning")
+        risk_items.append(
+            {
+                "risk_id": item.get("record_id") or f"operation_risk_{index:03d}",
+                "title": item.get("metric_name") or item.get("message", ""),
+                "severity": severity,
+                "priority": _priority_for_severity(severity),
+                "source_type": item.get("type", "rule"),
+                "description": item.get("message", ""),
+                "evidence": item.get("evidence", []),
+            }
+        )
+    return risk_items
+
+
+def _priority_for_severity(severity: str) -> str:
+    if severity in {"critical", "high"}:
+        return "P1"
+    return "P2"
+
+
+def _rule_evidence(description: str) -> dict:
+    return {"source": "rule_based_detection", "source_type": "rule", "description": description}
+
+
+def _record_evidence(source_type: str, record_id: str | None, description: str) -> dict:
+    return {
+        "source": "mock_ioc_api",
+        "source_type": source_type,
+        "record_id": record_id,
+        "description": description,
+    }
 
 
 def _to_number(value) -> float | None:
-    """尝试将值转换为浮点数，失败返回 None。"""
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -113,13 +283,12 @@ def _to_number(value) -> float | None:
 
 
 def _has_total_alarms(metrics: list[dict]) -> bool:
-    """检查是否存在告警相关的指标记录（用于判断是否应该做告警处理率检测）。"""
-    for m in metrics:
-        if m.get("metric_code") == "alarm_handling_rate":
-            v = m.get("value")
-            if v is not None and v != "--":
+    for metric in metrics:
+        if metric.get("metric_code") == "alarm_handling_rate":
+            value = metric.get("value")
+            if value is not None and value != "--":
                 try:
-                    return float(v) >= 0
+                    return float(value) >= 0
                 except (TypeError, ValueError):
                     return False
     return False
