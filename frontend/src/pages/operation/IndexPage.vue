@@ -1,23 +1,58 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { marked } from 'marked'
 
 import { useOperationStore } from '@/stores/operation'
 
 const store = useOperationStore()
+const route = useRoute()
 
+const domainLabel: Record<string, string> = {
+  safety: '本质安全',
+  maintenance: '设备运维',
+  business: '经营改善',
+  capability: '能力提升',
+}
+
+const queryDomain = (route.query.domain as string) || 'safety'
+const queryTimeDim = (route.query.time_dimension as string) || '月维度'
+const queryDate = (route.query.date as string) || ''
+const queryCategory = (route.query.category as string) || ''
+const activeDomain = domainLabel[queryDomain] || '本质安全'
 const hasResult = computed(() => store.result !== null)
 
+const pageTitle = `${activeDomain} — AI 运营分析诊断`
+
 function renderMarkdown(text: string): string {
-  return marked.parse(text, { async: false }) as string
+  return marked.parse(normalizeReportMarkdown(text), { async: false, gfm: true }) as string
 }
+
+function normalizeReportMarkdown(text: string): string {
+  return text
+    .replace(/\r\n/g, '\n')
+    .replace(/^##\s*运营分析(?:报告|结论)\s*\n+/u, '')
+    .replace(/</g, '&lt;')
+}
+
+onMounted(() => {
+  if (!store.result && !store.loading) {
+    store.analyze({
+      trigger_type: 'tab_analysis',
+      domain: queryDomain,
+      active_tab: activeDomain,
+      time_dimension: queryTimeDim,
+      date: queryDate,
+    })
+  }
+})
 </script>
 
 <template>
   <div class="operation-page">
     <div class="operation-page__header">
       <h1>运营分析</h1>
-      <p class="page-subtitle">本质安全 — AI 运营分析诊断</p>
+      <p class="page-subtitle">{{ pageTitle }}</p>
     </div>
 
     <div class="operation-page__actions">
@@ -26,14 +61,18 @@ function renderMarkdown(text: string): string {
         :disabled="store.loading"
         @click="store.analyze({
           trigger_type: 'tab_analysis',
-          domain: 'safety',
-          active_tab: '本质安全',
-          time_dimension: 'month',
-          date: '2026-07',
+          domain: queryDomain,
+          active_tab: activeDomain,
+          time_dimension: queryTimeDim,
+          date: queryDate,
         })"
       >
         {{ store.loading ? '分析中...' : '分析' }}
       </button>
+      <div v-if="queryDate || queryCategory" class="operation-page__params">
+        <span v-if="queryDate" class="param-tag">{{ queryDate }}</span>
+        <span v-if="queryCategory" class="param-tag">{{ queryCategory }}</span>
+      </div>
     </div>
 
     <p v-if="store.error" class="operation-error">{{ store.error }}</p>
@@ -41,7 +80,7 @@ function renderMarkdown(text: string): string {
     <!-- 分析过程展示 -->
     <div v-if="store.loading" class="operation-progress">
       <div class="progress-card">
-        <h3>分析进行中</h3>
+        <h3>分析进行中 — {{ activeDomain }}</h3>
         <div class="step-list">
           <div
             v-for="(step, i) in store.steps"
@@ -67,9 +106,9 @@ function renderMarkdown(text: string): string {
     </div>
 
     <!-- 分析结果 -->
-      <div v-if="hasResult" class="operation-result">
+    <div v-if="hasResult" class="operation-result">
       <div class="result-section result-section--summary">
-        <h2>AI 运营分析结论</h2>
+        <h2>AI 运营分析结论 — {{ activeDomain }}</h2>
         <div class="markdown-content" v-html="renderMarkdown(store.result!.summary)" />
       </div>
 
@@ -124,7 +163,24 @@ function renderMarkdown(text: string): string {
 }
 
 .operation-page__actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-bottom: 20px;
+}
+
+.operation-page__params {
+  display: flex;
+  gap: 8px;
+}
+
+.param-tag {
+  background: #f1f5f9;
+  border-radius: 4px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  padding: 4px 10px;
 }
 
 .btn-analyze {

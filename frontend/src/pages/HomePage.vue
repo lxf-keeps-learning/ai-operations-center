@@ -5,11 +5,14 @@ import { RouterLink } from 'vue-router'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { useAppStore } from '@/stores/app'
 
-type DomainKey = 'safety' | 'maintenance'
+type DomainKey = 'safety' | 'maintenance' | 'business' | 'capability'
 type RightTabKey = 'credential' | 'analysis' | 'iot'
 
 const appStore = useAppStore()
 const activeDomain = ref<DomainKey>('maintenance')
+const timeDimension = ref('月维度')
+const currentDate = ref('2026-05')
+const currentCategory = ref('全部')
 const activeRightTab = ref<RightTabKey>('credential')
 
 const domainPanels = {
@@ -32,6 +35,38 @@ const domainPanels = {
   maintenance: {
     title: '设备运维',
     filter: '设备检维修',
+    metrics: [
+      { label: '缺陷总数', value: '0', unit: '条', trend: '环比上期 -', tone: 'success' },
+      { label: '缺陷处置率', value: '0', unit: '%', trend: '环比上期 -', tone: 'neutral' },
+      { label: '缺陷未处置', value: '0', unit: '条', trend: '环比上期 -', tone: 'success' },
+      { label: '超期未处置', value: '0', unit: '条', trend: '环比上期 -', tone: 'success' },
+    ],
+    ranks: [
+      { name: '河北新奥能源', value: '0条' },
+      { name: '广东新奥能源', value: '0条' },
+      { name: '福建新奥能源', value: '0条' },
+      { name: '湖南新奥能源', value: '0条' },
+    ],
+  },
+  business: {
+    title: '经营改善',
+    filter: '经营指标',
+    metrics: [
+      { label: '营业收入', value: '12.8', unit: '亿', trend: '较上月 +3.2%', tone: 'success' },
+      { label: '利润率', value: '8.6', unit: '%', trend: '较上月 +0.5%', tone: 'success' },
+      { label: '客户满意度', value: '92.3', unit: '%', trend: '较上月 +1.8%', tone: 'success' },
+      { label: '合同履约率', value: '95.1', unit: '%', trend: '较上月 +2.1%', tone: 'success' },
+    ],
+    ranks: [
+      { name: '河北新奥能源', value: '96.2%' },
+      { name: '广东新奥能源', value: '93.8%' },
+      { name: '福建新奥能源', value: '91.5%' },
+      { name: '湖南新奥能源', value: '89.7%' },
+    ],
+  },
+  capability: {
+    title: '能力提升',
+    filter: '培训与认证',
     metrics: [
       { label: '缺陷总数', value: '0', unit: '条', trend: '环比上期 -', tone: 'success' },
       { label: '缺陷处置率', value: '0', unit: '%', trend: '环比上期 -', tone: 'neutral' },
@@ -214,6 +249,21 @@ onMounted(() => {
             <span>2026-05-04</span>
           </div>
         </section>
+
+        <RouterLink
+          class="ai-analysis-btn"
+          :to="{
+            path: '/operation',
+            query: {
+              domain: activeDomain,
+              time_dimension: timeDimension,
+              date: currentDate,
+              category: currentCategory,
+            },
+          }"
+        >
+          AI 智能分析
+        </RouterLink>
       </aside>
 
       <main class="map-stage">
@@ -356,6 +406,27 @@ onMounted(() => {
   gap: 16px;
   overflow: hidden;
   padding: 20px;
+}
+
+.ai-analysis-btn {
+  align-items: center;
+  background: linear-gradient(135deg, #3730a3, #6366f1);
+  border: none;
+  border-radius: 8px;
+  color: #ffffff;
+  cursor: pointer;
+  display: flex;
+  font-size: 14px;
+  font-weight: 800;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 16px;
+  text-decoration: none;
+  transition: opacity 0.15s;
+}
+
+.ai-analysis-btn:hover {
+  opacity: 0.9;
 }
 
 .domain-tabs,

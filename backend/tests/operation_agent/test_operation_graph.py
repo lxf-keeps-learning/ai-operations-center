@@ -80,7 +80,7 @@ class TestOperationGraph:
 
     def test_final_answer_is_markdown(self, operation_result: OperationState):
         md = operation_result["final_answer"]
-        assert md.startswith("##")
+        assert md.startswith("## 运营分析报告")
         assert "###" in md
 
     def test_evidence_not_empty(self, operation_result: OperationState):
@@ -154,11 +154,73 @@ async def test_operation_analyze_api_returns_closed_loop_payload(
     assert response.status_code == 200
     assert payload["success"] is True
     assert data["trace_id"].startswith("trace_")
-    assert data["summary"].startswith("## 运营分析结论")
+    assert data["summary"].startswith("## 运营分析报告")
     assert data["abnormal_items"]
     assert data["risk_items"]
     assert data["advice_items"]
     assert data["evidence"]
+
+
+def test_operation_report_normalizes_llm_report_shell(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_messy_chat(
+        prompt_content: str | None,
+        user_message: str,
+        history: list[dict[str, str]] | None = None,
+        timeout_seconds: float | None = None,
+    ) -> LlmResult:
+        if "请只输出 JSON 数组" in user_message:
+            content = json.dumps(
+                [
+                    {
+                        "title": "闭环高等级运营风险",
+                        "priority": "P1",
+                        "owner_role": "安全运营负责人",
+                        "action": "核查高等级告警并推进闭环。",
+                        "expected_result": "高等级风险进入闭环处置。",
+                        "evidence": [],
+                    }
+                ],
+                ensure_ascii=False,
+            )
+        else:
+            content = "\n".join(
+                [
+                    "好的，作为企业级智能运营中心的运营分析专家，我将生成报告。",
+                    "# 运营状态分析报告",
+                    "报告时间：2026年7月7日",
+                    "## 整体状态判断",
+                    "- 当前存在高等级未闭环告警，应优先处理。",
+                ]
+            )
+        return LlmResult(
+            content=content,
+            model="deepseek-chat",
+            prompt_tokens=8,
+            completion_tokens=6,
+            total_tokens=14,
+            cost_ms=5,
+            success=True,
+            system_prompt=prompt_content or "",
+        )
+
+    register_all_tools()
+    monkeypatch.setattr(
+        "app.operation_agent.nodes.analyze_reason_node.llm_client.chat",
+        fake_messy_chat,
+    )
+    monkeypatch.setattr(
+        "app.operation_agent.nodes.generate_advice_node.llm_client.chat",
+        fake_messy_chat,
+    )
+
+    result = operation_graph.invoke(_safety_state())
+    final_answer = result["final_answer"]
+
+    assert "好的，作为企业级智能运营中心" not in final_answer
+    assert "报告时间：" not in final_answer
+    assert "# 运营状态分析报告" not in final_answer
+    assert "#### 原因分析" in final_answer
+    assert "**整体状态判断**" in final_answer
 
 
 def test_operation_llm_failure_reports_deepseek_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
