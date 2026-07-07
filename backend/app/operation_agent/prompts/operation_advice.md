@@ -11,6 +11,19 @@
 {evidence}
 
 ## 输出要求
+请只输出 JSON 数组，不要输出 Markdown、解释文字或代码块。
+
+每个数组元素结构如下：
+
+{{
+  "title": "建议标题",
+  "priority": "P0 / P1 / P2",
+  "owner_role": "责任角色",
+  "action": "可执行动作",
+  "expected_result": "预期结果",
+  "evidence": []
+}}
+
 每条建议必须包含：
 - 建议标题
 - 优先级：P0 / P1 / P2

@@ -72,6 +72,7 @@ class LlmClient:
         prompt_content: str | None,
         user_message: str,
         history: list[dict[str, str]] | None = None,
+        timeout_seconds: float | None = None,
     ) -> LlmResult:
         provider = llm_settings.get_provider("deepseek")
         if not provider:
@@ -122,7 +123,7 @@ class LlmClient:
 
         start = perf_counter()
         try:
-            with httpx.Client(timeout=60) as http:
+            with httpx.Client(timeout=timeout_seconds or 60) as http:
                 resp = http.post(
                     f"{provider.base_url}/chat/completions",
                     headers=headers,
