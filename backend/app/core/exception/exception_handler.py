@@ -5,6 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.core.exception.base_exception import AppException
+from app.tool_center.core.exceptions import ToolException
 from app.core.exception.error_code import FORBIDDEN, INTERNAL_ERROR, NOT_FOUND, PARAM_ERROR, RATE_LIMIT, UNAUTHORIZED, VALIDATION_ERROR
 from app.core.logging.logger import get_logger
 from app.core.schema.response_schema import ApiResponse
@@ -71,6 +72,11 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return _build_response(code=VALIDATION_ERROR.code, message=VALIDATION_ERROR.message, http_status=422)
 
 
+async def tool_exception_handler(request: Request, exc: ToolException) -> JSONResponse:
+    logger.warning("ToolException: code=%s message=%s retryable=%s", exc.code, exc.message, exc.retryable)
+    return _build_response(code=INTERNAL_ERROR.code, message=exc.message, http_status=500)
+
+
 async def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.error(
         "Unhandled Exception: %s traceId=%s\n%s",
@@ -85,4 +91,5 @@ def register_exception_handlers(app):
     app.add_exception_handler(AppException, app_exception_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(ToolException, tool_exception_handler)
     app.add_exception_handler(Exception, general_exception_handler)
