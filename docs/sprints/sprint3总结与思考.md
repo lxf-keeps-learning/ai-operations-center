@@ -1,6 +1,5 @@
 # Sprint3 总结与思考：Tool Center 业务能力中心
 
-> 当前整理时间：2026-07-07  
 > 当前项目状态：Sprint3 Tool Center 已形成可运行、可测试、可通过 HTTP 调用的最小闭环。  
 > 核心结论：本 Sprint 已经从“AI Runtime 能对话”推进到“Agent 可以通过受控 Tool 安全访问业务能力”。
 

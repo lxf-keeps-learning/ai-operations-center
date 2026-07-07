@@ -33,6 +33,7 @@ const infraLinks = [
       <nav class="app-nav" aria-label="主导航">
         <RouterLink to="/">工作台</RouterLink>
         <RouterLink to="/items">数据管理</RouterLink>
+        <RouterLink to="/operation">运营分析</RouterLink>
         <div class="nav-dropdown">
           <button class="nav-dropdown__trigger" @click="toggleInfra">
             基础设施 <span class="nav-dropdown__arrow">{{ infraOpen ? '▲' : '▼' }}</span>

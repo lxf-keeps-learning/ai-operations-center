@@ -1,6 +1,5 @@
 # Sprint4：Operation Agent（运营分析智能体）详细实施方案
 
-> 角色定位：AI 架构师 + 项目导师视角  
 > Sprint主题：Operation Graph 的设计、实现与前端接入  
 > 项目背景：IOC 智能运营中心 Agent 项目  
 > 核心目标：在现有 IOC 项目中建设一个轻量 Operation Agent 能力模块，实现从运营中心页面数据到 AI 分析结论的完整闭环。
