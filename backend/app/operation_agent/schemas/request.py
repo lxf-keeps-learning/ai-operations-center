@@ -26,3 +26,4 @@ class OperationAnalyzeRequest(BaseModel):
     company_id: str | None = Field(default=None, description="公司 ID")
     project_id: str | None = Field(default=None, description="项目 ID")
     user_question: str | None = Field(default=None, description="用户输入的附加问题")
+    force_refresh: bool = Field(default=False, description="是否绕过 30 分钟缓存重新生成报告")

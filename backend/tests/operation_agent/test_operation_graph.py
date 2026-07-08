@@ -1,11 +1,14 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.config.settings import settings
 from app.main import app
+from app.operation_agent.api import records_api
 from app.operation_agent.graph import operation_graph
+from app.operation_agent.services.record_service import build_cache_key
 from app.operation_agent.state import OperationState
 from app.runtime.llm.client import LlmResult
 from app.tools.register import register_all_tools
@@ -23,6 +26,24 @@ def _safety_state() -> OperationState:
             "date": "2026-07",
         },
     }
+
+
+def test_operation_cache_key_distinguishes_tab_and_question() -> None:
+    base = {
+        "domain": "business",
+        "active_tab": "经营指标",
+        "time_dimension": "month",
+        "date": "2026-07",
+        "company_id": "c1",
+        "project_id": "p1",
+        "user_question": "",
+    }
+
+    tab_changed = {**base, "active_tab": "客户分析"}
+    question_changed = {**base, "user_question": "只看重点客户"}
+
+    assert build_cache_key(base) != build_cache_key(tab_changed)
+    assert build_cache_key(base) != build_cache_key(question_changed)
 
 
 @pytest.fixture
@@ -277,3 +298,24 @@ def test_operation_llm_failure_reports_deepseek_fallback(monkeypatch: pytest.Mon
     assert "DeepSeek 分析调用触发降级" in final_answer
     assert "DeepSeek API 调用超时" in final_answer
     assert "LLM 暂不可用" not in final_answer
+
+
+def test_download_report_supports_chinese_filename(monkeypatch: pytest.MonkeyPatch) -> None:
+    record = SimpleNamespace(
+        report_name='本质安全/运营分析报告',
+        final_answer_markdown="## 运营分析报告\n\n测试内容",
+    )
+    monkeypatch.setattr(
+        records_api.analysis_record_repo,
+        "get_by_id",
+        lambda _db, _record_id: record,
+    )
+
+    response = records_api.download_record(record_id=1, db=object())
+
+    disposition = response.headers["content-disposition"]
+    assert response.status_code == 200
+    assert response.body.decode("utf-8").startswith("## 运营分析报告")
+    assert 'filename="operation-report.md"' in disposition
+    assert "filename*=UTF-8''" in disposition
+    assert "本质安全" not in disposition

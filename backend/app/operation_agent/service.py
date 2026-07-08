@@ -33,21 +33,24 @@ def analyze_operation(request: OperationAnalyzeRequest, user_context: dict | Non
         "company_id": request.company_id,
         "project_id": request.project_id,
         "trigger_type": request.trigger_type,
+        "user_question": request.user_question,
     }
 
-    db = get_session_local()()
-    try:
-        cached = get_cached_result(db, page_context)
-        if cached:
-            return state_from_record(cached, page_context, user_context or {})
-    finally:
-        db.close()
+    if not request.force_refresh:
+        db = get_session_local()()
+        try:
+            cached = get_cached_result(db, page_context)
+            if cached:
+                return state_from_record(cached, page_context, user_context or {})
+        finally:
+            db.close()
 
     initial_state: OperationState = {
         "trigger_type": request.trigger_type,
         "user_question": request.user_question,
         "user_context": user_context or {},
         "page_context": page_context,
+        "llm_usages": [],
     }
 
     result = operation_graph.invoke(initial_state)
@@ -59,7 +62,7 @@ def analyze_operation(request: OperationAnalyzeRequest, user_context: dict | Non
 
     db2 = get_session_local()()
     try:
-        save_analysis_result(
+        saved = save_analysis_result(
             db2,
             trace_id=trace_id,
             page_context=page_context,
@@ -69,6 +72,7 @@ def analyze_operation(request: OperationAnalyzeRequest, user_context: dict | Non
             error_message=error_msg,
             user_context=user_context,
         )
+        result["record_id"] = saved.id
     finally:
         db2.close()
 
@@ -77,6 +81,7 @@ def analyze_operation(request: OperationAnalyzeRequest, user_context: dict | Non
 
 def state_from_record(record, page_context: dict, user_context: dict) -> OperationState:
     return {
+        "record_id": record.id,
         "trace_id": record.trace_id,
         "trigger_type": page_context.get("trigger_type", "tab_analysis"),
         "user_question": None,
@@ -90,5 +95,6 @@ def state_from_record(record, page_context: dict, user_context: dict) -> Operati
         "advice_items": (record.advice_items_json or {}).get("items", []) if record.advice_items_json else [],
         "evidence": (record.evidence_json or {}).get("items", []) if record.evidence_json else [],
         "final_answer": record.final_answer_markdown or "",
+        "llm_usages": [],
         "errors": [],
     }

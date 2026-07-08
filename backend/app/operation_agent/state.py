@@ -40,10 +40,12 @@ class OperationState(TypedDict, total=False):
 
     evidence        — 数据来源证据链，贯穿整个分析过程
     final_answer    — SummaryNode 生成的最终 Markdown 结论
+    llm_usages      — 各 LLM 调用的 token 使用记录（累计，用于写入 usage 表）
 
     errors          — 各 Node 处理过程中的错误记录（不阻塞后续节点）
     """
     trace_id: str
+    record_id: NotRequired[int | None]
 
     trigger_type: TriggerType
     analysis_mode: AnalysisMode
@@ -63,5 +65,6 @@ class OperationState(TypedDict, total=False):
 
     evidence: list[dict[str, Any]]
     final_answer: str
+    llm_usages: list[dict[str, Any]]
 
     errors: list[dict[str, Any]]

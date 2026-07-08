@@ -57,6 +57,7 @@ def operation_analyze(payload: OperationAnalyzeRequest) -> ApiResponse[Operation
 
     # 构造统一响应
     data = OperationAnalyzeResponse(
+        record_id=result.get("record_id"),
         trace_id=result.get("trace_id", ""),
         status=status,
         summary=final_answer,

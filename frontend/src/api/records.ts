@@ -10,6 +10,7 @@ export interface AnalysisRecord {
   status: string
   summary_text: string | null
   final_answer_markdown: string | null
+  page_context: Record<string, unknown> | null
   advice_items: Record<string, unknown> | null
   evidence: Record<string, unknown> | null
   created_at: string | null

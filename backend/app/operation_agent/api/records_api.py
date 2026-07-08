@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, Query
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -20,6 +22,7 @@ class AnalysisRecordOut(BaseModel):
     status: str
     summary_text: str | None
     final_answer_markdown: str | None
+    page_context: dict | None
     advice_items_json: dict | None
     evidence_json: dict | None
     created_at: str | None
@@ -48,6 +51,7 @@ def list_records(
             "status": r.status,
             "summary_text": r.summary_text,
             "final_answer_markdown": r.final_answer_markdown,
+            "page_context": r.page_context_json,
             "advice_items": r.advice_items_json,
             "evidence": r.evidence_json,
             "created_at": r.created_at.isoformat() if r.created_at else None,
@@ -71,6 +75,7 @@ def get_record_detail(record_id: int, db: Session = Depends(get_db)) -> ApiRespo
         "error_message": record.error_message,
         "summary_text": record.summary_text,
         "final_answer_markdown": record.final_answer_markdown,
+        "page_context": record.page_context_json,
         "abnormal_items": record.abnormal_items_json,
         "risk_items": record.risk_items_json,
         "advice_items": record.advice_items_json,
@@ -87,13 +92,33 @@ def get_record_detail(record_id: int, db: Session = Depends(get_db)) -> ApiRespo
 def download_record(record_id: int, db: Session = Depends(get_db)):
     record = analysis_record_repo.get_by_id(db, record_id)
     if record is None:
-        return ApiResponse(code=404001, message="记录不存在")
-    filename = f"{record.report_name or '运营分析报告'}.md"
+        raise HTTPException(status_code=404, detail="记录不存在")
+    filename = _markdown_filename(record.report_name or "运营分析报告")
     content = record.final_answer_markdown or "# 无内容"
     return PlainTextResponse(
         content=content,
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Content-Type": "text/markdown; charset=utf-8",
-        },
+        media_type="text/markdown; charset=utf-8",
+        headers=_download_headers(filename),
     )
+
+
+def _markdown_filename(name: str) -> str:
+    """生成安全的 Markdown 文件名，避免路径字符和空文件名影响下载。"""
+    cleaned = "".join(ch if ch not in '\\/:*?"<>|\r\n' else "_" for ch in name).strip()
+    if not cleaned:
+        cleaned = "运营分析报告"
+    return cleaned if cleaned.lower().endswith(".md") else f"{cleaned}.md"
+
+
+def _download_headers(filename: str) -> dict[str, str]:
+    """构造兼容中文文件名的下载头。
+
+    HTTP 头需要能编码为 latin-1。中文文件名通过 filename* 按 RFC 5987 编码，
+    filename 保留 ASCII fallback，避免 Starlette 在响应头编码阶段抛 UnicodeEncodeError。
+    """
+    encoded = quote(filename, safe="")
+    return {
+        "Content-Disposition": (
+            f'attachment; filename="operation-report.md"; filename*=UTF-8\'\'{encoded}'
+        ),
+    }

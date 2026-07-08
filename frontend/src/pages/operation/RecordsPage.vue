@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { marked } from 'marked'
 
 import { getDownloadUrl, getRecordDetail, listRecords, type AnalysisRecord, type AnalysisRecordDetail } from '@/api/records'
+import ReportChatPanel from '@/components/ReportChatPanel.vue'
 
 const domainTabs = [
   { key: '', label: '全部' },
@@ -54,6 +55,32 @@ const domainLabel: Record<string, string> = {
   safety: '本质安全', maintenance: '设备运维', business: '经营改善', capability: '能力提升',
 }
 
+const timeDimensionLabel: Record<string, string> = {
+  day: '日报', week: '周报', month: '月报',
+}
+
+function formatFilter(r: AnalysisRecord): string {
+  const parts: string[] = []
+  if (r.time_dimension) {
+    parts.push(timeDimensionLabel[r.time_dimension] || r.time_dimension)
+  }
+  if (r.analysis_date) {
+    parts.push(r.analysis_date)
+  } else if (r.time_dimension === 'month' && r.created_at) {
+    parts.push(r.created_at.slice(0, 7))
+  } else if (r.time_dimension === 'day' && r.created_at) {
+    parts.push(r.created_at.slice(0, 10))
+  } else if (r.time_dimension === 'week' && r.created_at) {
+    parts.push(r.created_at.slice(0, 10))
+  }
+  return parts.join(' ') || '-'
+}
+
+function formatTime(iso: string | null): string {
+  if (!iso) return '-'
+  return iso.slice(0, 16).replace('T', ' ')
+}
+
 onMounted(fetchRecords)
 </script>
 
@@ -64,7 +91,6 @@ onMounted(fetchRecords)
       <p class="page-subtitle">运营分析历史记录</p>
     </div>
 
-    <!-- 域标签 -->
     <div class="domain-tabs">
       <button
         v-for="tab in domainTabs"
@@ -79,26 +105,39 @@ onMounted(fetchRecords)
     <p v-if="error" class="page-error">{{ error }}</p>
     <p v-if="loading" class="page-loading">加载中...</p>
 
-    <!-- 列表 -->
     <div v-if="!loading && !records.length" class="empty-state">暂无分析记录</div>
 
-    <div v-else class="record-list">
-      <div v-for="r in records" :key="r.id" class="record-card">
-        <div class="record-card__top">
-          <span class="record-domain" :class="`record-domain--${r.domain}`">{{ domainLabel[r.domain] || r.domain }}</span>
-          <span class="record-status" :class="`record-status--${r.status}`">{{ r.status }}</span>
-          <span class="record-date">{{ r.created_at?.slice(0, 16) || '-' }}</span>
-        </div>
-        <div class="record-card__title">{{ r.report_name || '运营分析报告' }}</div>
-        <div class="record-card__summary">{{ r.summary_text || '无摘要' }}</div>
-        <div class="record-card__actions">
-          <button class="btn-text" @click="openDetail(r.id)">查看详情</button>
-          <a :href="getDownloadUrl(r.id)" class="btn-text" download>下载报告</a>
-        </div>
-      </div>
+    <div v-else class="records-table-wrapper">
+      <table class="records-table">
+        <thead>
+          <tr>
+            <th>报告名称</th>
+            <th>领域</th>
+            <th>筛选条件</th>
+            <th>摘要</th>
+            <th>生成时间</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="r in records" :key="r.id">
+            <td class="cell-name">{{ r.report_name || '运营分析报告' }}</td>
+            <td>
+              <span class="record-domain" :class="`record-domain--${r.domain}`">{{ domainLabel[r.domain] || r.domain }}</span>
+            </td>
+            <td class="cell-filter">{{ formatFilter(r) }}</td>
+            <td class="cell-summary">{{ r.summary_text || '-' }}</td>
+            <td class="cell-time">{{ formatTime(r.created_at) }}</td>
+            <td class="cell-actions">
+              <button class="btn-text" @click="openDetail(r.id)">详情</button>
+              <RouterLink class="btn-text" :to="{ path: '/operation/report-chat', query: { record_id: r.id } }">AI 追问</RouterLink>
+              <a :href="getDownloadUrl(r.id)" class="btn-text" download>下载</a>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
 
-    <!-- 详情弹窗 -->
     <Teleport to="body">
       <div v-if="showDetail && selectedRecord" class="detail-overlay" @click.self="closeDetail">
         <div class="detail-modal">
@@ -111,11 +150,19 @@ onMounted(fetchRecords)
             <span>Status: {{ selectedRecord.status }}</span>
             <span>Tokens: {{ selectedRecord.total_tokens }}</span>
             <span>Model: {{ selectedRecord.model_name || '-' }}</span>
-            <span>时间: {{ selectedRecord.created_at?.slice(0, 16) || '-' }}</span>
+            <span>时间: {{ formatTime(selectedRecord.created_at) }}</span>
             <span>Trace: <code>{{ selectedRecord.trace_id }}</code></span>
           </div>
-          <div class="detail-modal__body">
-            <div class="markdown-content" v-html="renderMd(selectedRecord.final_answer_markdown)" />
+          <div class="detail-modal__body detail-modal__body--with-chat">
+            <div class="detail-report">
+              <div class="markdown-content" v-html="renderMd(selectedRecord.final_answer_markdown)" />
+            </div>
+            <ReportChatPanel
+              class="detail-chat"
+              :report-id="selectedRecord.id"
+              :report-title="selectedRecord.report_name || '运营分析报告'"
+              compact
+            />
           </div>
           <div class="detail-modal__footer">
             <a :href="getDownloadUrl(selectedRecord.id)" class="btn-download" download>下载 Markdown 报告</a>
@@ -128,7 +175,7 @@ onMounted(fetchRecords)
 
 <style scoped>
 .records-page {
-  max-width: 960px;
+  max-width: 1200px;
 }
 
 .records-page__header h1 {
@@ -190,24 +237,76 @@ onMounted(fetchRecords)
   text-align: center;
 }
 
-.record-list {
-  display: grid;
-  gap: 12px;
-}
-
-.record-card {
+.records-table-wrapper {
   background: #ffffff;
   border: 1px solid var(--color-border);
   border-radius: 8px;
-  padding: 20px;
+  overflow-x: auto;
 }
 
-.record-card__top {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 8px;
+.records-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.records-table th {
+  background: #f8fafc;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 800;
+  padding: 12px 16px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.records-table td {
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 14px;
+  padding: 12px 16px;
+}
+
+.records-table tr:last-child td {
+  border-bottom: none;
+}
+
+.records-table tr:hover td {
+  background: #f8fafc;
+}
+
+.cell-name {
+  color: var(--color-heading);
+  font-weight: 700;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-filter {
+  white-space: nowrap;
+}
+
+.cell-summary {
+  color: var(--color-text-muted);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-time {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.cell-actions {
+  white-space: nowrap;
+}
+
+.cell-actions .btn-text + .btn-text {
+  margin-left: 12px;
 }
 
 .record-domain {
@@ -215,48 +314,13 @@ onMounted(fetchRecords)
   font-size: 12px;
   font-weight: 800;
   padding: 2px 8px;
+  white-space: nowrap;
 }
 
 .record-domain--safety { background: #fef2f2; color: #991b1b; }
 .record-domain--maintenance { background: #fffbeb; color: #854d0e; }
 .record-domain--business { background: #f0fdf4; color: #166534; }
 .record-domain--capability { background: #eff6ff; color: #1e40af; }
-
-.record-status {
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 2px 8px;
-}
-
-.record-status--success { background: #f0fdf4; color: #166534; }
-.record-status--partial { background: #fffbeb; color: #854d0e; }
-.record-status--failed { background: #fef2f2; color: #991b1b; }
-
-.record-date {
-  color: var(--color-text-muted);
-  font-size: 13px;
-  margin-left: auto;
-}
-
-.record-card__title {
-  color: var(--color-heading);
-  font-size: 16px;
-  font-weight: 700;
-  margin-bottom: 4px;
-}
-
-.record-card__summary {
-  color: var(--color-text-muted);
-  font-size: 14px;
-  line-height: 1.5;
-  margin-bottom: 12px;
-}
-
-.record-card__actions {
-  display: flex;
-  gap: 16px;
-}
 
 .btn-text {
   background: none;
@@ -269,7 +333,6 @@ onMounted(fetchRecords)
   text-decoration: none;
 }
 
-/* ── 详情弹窗 ── */
 .detail-overlay {
   align-items: center;
   background: rgba(0, 0, 0, 0.4);
@@ -286,7 +349,7 @@ onMounted(fetchRecords)
   display: flex;
   flex-direction: column;
   max-height: 90vh;
-  max-width: 800px;
+  max-width: 1280px;
   width: 90%;
 }
 
@@ -335,6 +398,23 @@ onMounted(fetchRecords)
   flex: 1;
   overflow-y: auto;
   padding: 24px;
+}
+
+.detail-modal__body--with-chat {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 430px);
+  min-height: 0;
+}
+
+.detail-report {
+  min-width: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.detail-chat {
+  min-height: 620px;
 }
 
 .markdown-content {
@@ -414,5 +494,19 @@ onMounted(fetchRecords)
   min-height: 40px;
   padding: 0 24px;
   text-decoration: none;
+}
+
+@media (max-width: 980px) {
+  .detail-modal {
+    width: 94%;
+  }
+
+  .detail-modal__body--with-chat {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-chat {
+    min-height: 520px;
+  }
 }
 </style>

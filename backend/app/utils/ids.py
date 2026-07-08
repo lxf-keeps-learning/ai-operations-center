@@ -15,6 +15,10 @@ def new_session_id() -> str:
     return _new_id("sess")
 
 
+def new_message_id() -> str:
+    return _new_id("msg")
+
+
 def new_conversation_id() -> str:
     return _new_id("conv")
 

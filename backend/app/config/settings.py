@@ -23,6 +23,41 @@ class Settings(BaseSettings):
         default=20.0,
         description="Operation Agent 调用 DeepSeek 生成报告片段的单次超时时间。",
     )
+    rag_search_url: str = Field(
+        default="",
+        description="外部 RAG 服务的 API 地址。为空时不调用 RAG，返回空结果。",
+    )
+    rag_search_api_key: str = Field(
+        default="",
+        description="外部 RAG 服务的 API 鉴权密钥。",
+    )
+    rag_search_timeout_seconds: float = Field(
+        default=15.0,
+        description="RAG 检索请求超时秒数。",
+    )
+
+    # Sprint6.1: RAG Decision & Query Rewrite Optimization.
+    # 默认关闭 LLM 优化，走原有规则逻辑。
+    rag_use_llm_decision: bool = Field(
+        default=False,
+        description="是否启用 LLM 进行 RAG 需求判断。关闭时走原有规则匹配。",
+    )
+    rag_use_query_rewrite: bool = Field(
+        default=False,
+        description="是否启用 LLM 进行 RAG Query 改写。关闭时走原有规则拼接。",
+    )
+    rag_decision_confidence_threshold: float = Field(
+        default=0.65,
+        ge=0.0,
+        le=1.0,
+        description="RAG 决策置信度阈值。LLM 判断置信度低于此值时 fallback 到规则。",
+    )
+    rag_query_rewrite_confidence_threshold: float = Field(
+        default=0.65,
+        ge=0.0,
+        le=1.0,
+        description="Query 改写置信度阈值。LLM 改写置信度低于此值时 fallback 到规则。",
+    )
 
     model_config = SettingsConfigDict(
         env_file=find_env_files(),

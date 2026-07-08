@@ -36,6 +36,7 @@ def init_context_node(state: OperationState) -> OperationState:
     state["risk_items"] = []
     state["advice_items"] = []
     state["evidence"] = []
+    state["llm_usages"] = []
     state["errors"] = []
     state["final_answer"] = ""
     return state

@@ -43,8 +43,7 @@ const infraLinks = [
             运营分析 <span class="nav-dropdown__arrow">{{ operationOpen ? '▲' : '▼' }}</span>
           </button>
           <div v-if="operationOpen" class="nav-dropdown__menu" @mouseleave="operationOpen = false">
-            <RouterLink to="/operation" class="nav-dropdown__item" @click="operationOpen = false">AI 智能分析</RouterLink>
-            <RouterLink to="/operation/records" class="nav-dropdown__item" @click="operationOpen = false">分析记录</RouterLink>
+            <RouterLink to="/operation" class="nav-dropdown__item" @click="operationOpen = false">报告分析</RouterLink>
           </div>
         </div>
         <div class="nav-dropdown">

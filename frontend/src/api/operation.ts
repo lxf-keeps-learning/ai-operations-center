@@ -1,6 +1,7 @@
 import { request } from '@/utils/request'
 
 export interface OperationResult {
+  record_id: number | null
   trace_id: string
   status: string
   summary: string
@@ -20,6 +21,7 @@ export interface OperationAnalyzeParams {
   company_id?: string
   project_id?: string
   user_question?: string
+  force_refresh?: boolean
 }
 
 export async function analyzeOperation(params: OperationAnalyzeParams) {

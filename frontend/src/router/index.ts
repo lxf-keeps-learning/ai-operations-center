@@ -67,13 +67,15 @@ const router = createRouter({
       path: '/operation',
       name: 'operation',
       component: () => import('@/pages/operation/IndexPage.vue'),
-      meta: { title: '运营分析 - 智能运营中心' },
+      meta: { title: '报告分析 - 智能运营中心' },
     },
     {
       path: '/operation/records',
-      name: 'operation-records',
-      component: () => import('@/pages/operation/RecordsPage.vue'),
-      meta: { title: '分析记录 - 智能运营中心' },
+      redirect: '/operation',
+    },
+    {
+      path: '/operation/report-chat',
+      redirect: '/operation',
     },
   ],
   scrollBehavior() {

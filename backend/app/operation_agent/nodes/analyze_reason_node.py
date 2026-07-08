@@ -38,12 +38,23 @@ def analyze_reason_node(state: OperationState) -> OperationState:
         evidence=json.dumps(evidence, ensure_ascii=False, indent=2),
     )
 
+    llm_usages: list[dict] = state.get("llm_usages", [])
+
     try:
         result: LlmResult = llm_client.chat(
             prompt_content=system or None,
             user_message=prompt,
             timeout_seconds=settings.operation_llm_timeout_seconds,
         )
+        llm_usages.append({
+            "action_type": "analyze_reason",
+            "model_name": result.model,
+            "input_tokens": result.prompt_tokens,
+            "output_tokens": result.completion_tokens,
+            "total_tokens": result.total_tokens,
+            "success": 1 if result.success else 0,
+            "error_message": result.error_message if not result.success else None,
+        })
         if result.success and result.content.strip():
             state["reason_analysis"] = result.content
         else:
@@ -57,9 +68,19 @@ def analyze_reason_node(state: OperationState) -> OperationState:
                 result.error_message,
             )
     except Exception as e:
+        llm_usages.append({
+            "action_type": "analyze_reason",
+            "model_name": "deepseek-chat",
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+            "success": 0,
+            "error_message": str(e),
+        })
         errors.append({"node": "analyze_reason", "message": f"LLM 调用异常: {e}"})
         state["reason_analysis"] = _fallback_reason(abnormal, metrics, evidence, str(e))
 
+    state["llm_usages"] = llm_usages
     state["errors"] = errors
     return state
 

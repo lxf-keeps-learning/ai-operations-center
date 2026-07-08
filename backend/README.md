@@ -263,18 +263,21 @@ alembic upgrade head
 默认按 `8000` 端口启动：
 
 ```bash
+source .venv/bin/activate
 fastapi dev app/main.py --host 127.0.0.1 --port 8000
 ```
 
 也可以使用 uvicorn：
 
 ```bash
+source .venv/bin/activate
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 如果本机 `8000` 已被其他服务占用，可以临时改用 `8001`：
 
 ```bash
+source .venv/bin/activate
 uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
 ```
 

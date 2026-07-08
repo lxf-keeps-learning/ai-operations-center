@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 class OperationAnalyzeResponse(BaseModel):
     """运营分析响应。"""
+    record_id: int | None = Field(default=None, description="分析记录 ID，用于报告追问绑定 report_id")
     trace_id: str = Field(description="请求追踪 ID，用于链路排查")
     status: str = Field(description="处理状态: success(成功) / partial(部分异常) / failed(失败)")
     summary: str = Field(default="", description="运营分析结论（Markdown 格式，前端可直接展示）")
