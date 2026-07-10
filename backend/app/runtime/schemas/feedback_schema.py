@@ -1,3 +1,10 @@
+"""
+Feedback DTO — 用户反馈的请求/响应数据结构
+
+FeedbackCreate:  提交反馈时的请求体（评分 1-5、反馈类型、文字内容）
+FeedbackResponse: 反馈的响应体
+"""
+
 from datetime import datetime
 
 from pydantic import Field

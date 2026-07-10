@@ -1,3 +1,13 @@
+"""
+应用配置模块 — 统一对外暴露应用级配置项
+
+封装底层 _legacy_settings，按功能分类暴露配置属性：
+  - 基础：app_name / env / version / cors / timezone
+  - 数据库：database_url
+  - Redis：redis_enabled / redis_url
+  - 环境判断：is_dev / is_test / is_prod
+"""
+
 from functools import lru_cache
 
 from app.config.settings import settings as _legacy_settings

@@ -1,3 +1,10 @@
+"""
+Prompt 查询接口 — GET /prompts/{prompt_code}
+
+通过 prompt_code 查询系统中预配置的 Prompt 模板。
+用于前端需要获取完整 Prompt 内容进行展示或调试的场景。
+"""
+
 from fastapi import APIRouter, HTTPException
 
 from app.application.agent_service import agent_service

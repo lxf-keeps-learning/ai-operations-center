@@ -21,7 +21,7 @@ class OperationState(TypedDict, total=False):
     """
     OperationState 字段说明：
 
-    trace_id        — 全链路追踪 ID，在 InitContextNode 中生成
+    trace_id        — 全链路追踪 ID，优先沿用 API/SSE 请求 Trace，缺失时由 InitContextNode 生成
     trigger_type    — 触发类型（页面加载/ Tab 切换/ 专家问答/ 定时任务）
     analysis_mode   — 分析模式（快照/ 领域聚焦/ 问答），由 trigger_type 映射
     domain          — 分析领域（安全/ 设备/ 经营/ 全部）
@@ -35,7 +35,7 @@ class OperationState(TypedDict, total=False):
 
     abnormal_items  — DetectAbnormalNode 输出的异常项列表
     reason_analysis — AnalyzeReasonNode 生成的异常原因分析文本
-    risk_items      — 风险项列表（当前为预留字段）
+    risk_items      — 基于异常等级和业务记录形成的风险排序列表
     advice_items    — GenerateAdviceNode 生成的改进建议列表
 
     evidence        — 数据来源证据链，贯穿整个分析过程
@@ -66,5 +66,8 @@ class OperationState(TypedDict, total=False):
     evidence: list[dict[str, Any]]
     final_answer: str
     llm_usages: list[dict[str, Any]]
+
+    event_log: NotRequired[list[dict[str, Any]]]
+    _event_persistence_disabled: NotRequired[bool]
 
     errors: list[dict[str, Any]]

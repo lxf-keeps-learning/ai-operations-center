@@ -1,3 +1,11 @@
+"""
+AiSession — 运行记录模型
+
+代表一次 AI 对话/分析任务的单次执行记录。
+包含输入文本、输出文本、状态、耗时等信息。
+与 Conversation 是多对一关系。
+"""
+
 from datetime import datetime
 
 from sqlalchemy import DateTime, JSON, String, Text

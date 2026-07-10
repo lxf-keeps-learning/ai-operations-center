@@ -1,3 +1,10 @@
+"""
+AiTrace — 全链路追踪模型
+
+记录一次请求从 API → Service → Graph → Tool → LLM 的完整链路。
+每一条记录是一个 Span，通过 trace_id 串联整条链路，parent_span_id 表示父子关系。
+"""
+
 from datetime import datetime
 
 from sqlalchemy import DateTime, Integer, JSON, String, Text

@@ -1,3 +1,16 @@
+# 工具领域契约模块
+#
+# 定义 Tool 框架的数据结构：
+# - ToolContext：调用上下文（身份、租户、链路）
+# - BaseToolInput：基础入参（context + filters）
+# - Evidence：证据来源，用于 Agent 回答时追溯数据出处
+# - ToolError：结构化错误信息
+# - ToolResult：所有 Tool 统一返回结构
+#
+# 这些是 Tool 与 LangGraph、Agent、Tool Executor 之间的内部执行协议，
+# 不是 HTTP API 的通用 DTO。API 层需要返回 ToolResult 时，应使用
+# app/core/schema 中的全局 ApiResponse 进行包装。
+
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -30,7 +43,7 @@ class BaseToolInput(BaseModel):
 class Evidence(BaseModel):
     """Tool 返回数据的证据来源。
 
-    Agent 最终回答用户时，应能通过 evidence 说明“这些结论来自哪里”。
+    Agent 最终回答用户时，应能通过 evidence 说明"这些结论来自哪里"。
     """
 
     source: str

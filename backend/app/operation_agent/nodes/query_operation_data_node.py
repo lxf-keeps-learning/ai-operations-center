@@ -3,7 +3,7 @@
 from typing import Any
 
 from app.operation_agent.state import OperationState
-from app.tool_center.core.schemas import BaseToolInput, ToolContext, ToolResult
+from app.tool_center.contracts import BaseToolInput, ToolContext, ToolResult
 from app.tool_center.registry import get_tool
 
 _SUPPORTED_DOMAINS = {"safety", "maintenance", "business", "capability", "all"}

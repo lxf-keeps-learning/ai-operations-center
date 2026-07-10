@@ -1,3 +1,11 @@
+"""
+Prompt DTO — Prompt 模板的请求/响应数据结构
+
+PromptCreate:  创建 Prompt 时的请求体
+PromptStatusUpdate: 仅更新状态的请求体
+PromptResponse: Prompt 的响应体（含版本号、内容、状态等）
+"""
+
 from datetime import datetime
 
 from pydantic import Field

@@ -1,55 +1,65 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 
-import { request } from '@/utils/request'
+import { streamRuntimeChat, type RuntimeChatStreamCompleted } from '@/api/runtime'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
 }
 
+const props = withDefaults(defineProps<{
+  promptCode?: string
+}>(), {
+  promptCode: undefined,
+})
+
 const messages = ref<ChatMessage[]>([])
 const input = ref('')
 const loading = ref(false)
 const error = ref('')
+const streaming = ref(false)
 const conversationId = ref<string | null>(null)
 const lastSessionId = ref<string | null>(null)
 const lastTraceId = ref<string | null>(null)
 
-async function sendMessage() {
+function sendMessage() {
   const text = input.value.trim()
   if (!text || loading.value) return
 
   messages.value.push({ role: 'user', content: text })
   input.value = ''
   loading.value = true
+  streaming.value = true
   error.value = ''
 
-  try {
-    const payload: Record<string, unknown> = { message: text, user_id: 'anonymous' }
-    if (conversationId.value) {
-      payload.conversation_id = conversationId.value
-    }
+  const assistantMsg: ChatMessage = { role: 'assistant', content: '' }
+  messages.value.push(assistantMsg)
 
-    const res = await request<{
-      conversation_id: string
-      session_id: string
-      trace_id: string
-      answer: string
-    }>('/runtime/chat', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    })
+  const stream = streamRuntimeChat(
+    { message: text, conversation_id: conversationId.value, prompt_code: props.promptCode },
+    {
+      onStarted() {},
+      onDelta(delta: string) {
+        assistantMsg.content += delta
+      },
+      onCompleted(event: RuntimeChatStreamCompleted) {
+        conversationId.value = event.conversation_id
+        lastSessionId.value = event.session_id
+        lastTraceId.value = event.trace_id
+        assistantMsg.content = event.answer
+      },
+      onError(e: Error) {
+        error.value = e.message
+      },
+      onClose() {
+        loading.value = false
+        streaming.value = false
+      },
+    },
+  )
 
-    conversationId.value = res.conversation_id
-    lastSessionId.value = res.session_id
-    lastTraceId.value = res.trace_id
-    messages.value.push({ role: 'assistant', content: res.answer })
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '请求失败'
-  } finally {
-    loading.value = false
-  }
+  // 如果需要在组件卸载时取消，可保存 stream
 }
 </script>
 
@@ -71,9 +81,12 @@ async function sendMessage() {
         :class="msg.role === 'user' ? 'chat-message--user' : 'chat-message--assistant'"
       >
         <div class="chat-message__role">{{ msg.role === 'user' ? '你' : 'AI' }}</div>
-        <div class="chat-message__bubble">{{ msg.content }}</div>
+        <div
+          class="chat-message__bubble"
+          :class="{ 'chat-message__bubble--streaming': streaming && i === messages.length - 1 && msg.role === 'assistant' }"
+        >{{ msg.content }}</div>
       </div>
-      <div v-if="loading" class="chat-panel__loading">AI 思考中...</div>
+      <div v-if="loading && messages.length === 0" class="chat-panel__loading">AI 思考中...</div>
     </div>
 
     <p v-if="error" class="chat-panel__error">{{ error }}</p>
@@ -257,5 +270,18 @@ async function sendMessage() {
   font-family: ui-monospace, monospace;
   font-size: 11px;
   padding: 1px 6px;
+}
+
+.chat-message__bubble--streaming::after {
+  animation: blink 1s step-end infinite;
+  color: #166534;
+  content: '|';
+  font-weight: 700;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
 }
 </style>

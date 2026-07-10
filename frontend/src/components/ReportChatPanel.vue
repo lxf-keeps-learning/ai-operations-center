@@ -1,15 +1,19 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
-import { marked } from 'marked'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 
 import {
   createReportChatSession,
+  getRecentReportChatSession,
   getReportChatMessages,
-  sendReportChatMessage,
   type ReportChatMessage,
   type ReportQuestionScope,
   type RagSource,
 } from '@/api/reportChat'
+import {
+  streamReportChatMessage,
+  type ReportChatStreamController,
+} from '@/services/reportChatStream'
+import { renderSafeMarkdown } from '@/utils/markdown'
 
 const props = withDefaults(defineProps<{
   reportId?: number | null
@@ -19,7 +23,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   reportId: null,
   reportTitle: '',
-  userId: 'anonymous',
+  userId: '',
   compact: false,
 })
 
@@ -34,16 +38,22 @@ const quickQuestions = [
 
 const messages = ref<ReportChatMessage[]>([])
 const input = ref('')
+const conversationId = ref('')
 const sessionId = ref('')
+const lastRuntimeSessionId = ref('')
 const activeReportId = ref<number | null>(null)
 const loadingSession = ref(false)
 const sending = ref(false)
 const error = ref('')
 const lastTraceId = ref('')
 const messageListRef = ref<HTMLElement | null>(null)
+let streamController: ReportChatStreamController | null = null
+let streamCompleted = false
+const fallbackVisitorId = `visitor_${crypto.randomUUID()}`
 
-const canSend = computed(() => Boolean(props.reportId && sessionId.value && input.value.trim() && !sending.value))
+const canSend = computed(() => Boolean(props.reportId && input.value.trim() && !loadingSession.value && !sending.value))
 const panelTitle = computed(() => props.reportTitle || '本质安全分析报告')
+const effectiveUserId = computed(() => resolveReportChatUserId(props.userId))
 
 watch(
   () => props.reportId,
@@ -54,10 +64,13 @@ watch(
 )
 
 async function prepareSession(reportId: number | null) {
+  cancelActiveStream()
   error.value = ''
   lastTraceId.value = ''
+  lastRuntimeSessionId.value = ''
   input.value = ''
   messages.value = []
+  conversationId.value = ''
   sessionId.value = ''
   activeReportId.value = reportId
 
@@ -67,14 +80,21 @@ async function prepareSession(reportId: number | null) {
 
   loadingSession.value = true
   try {
-    const session = await createReportChatSession(reportId, props.userId)
+    const session = await getRecentReportChatSession(reportId, effectiveUserId.value)
     if (activeReportId.value !== reportId) {
       return
     }
+    if (!session) {
+      return
+    }
+    conversationId.value = session.conversation_id
     sessionId.value = session.session_id
     const history = await getReportChatMessages(session.session_id)
     if (activeReportId.value === reportId) {
       messages.value = history.messages
+      lastRuntimeSessionId.value = [...history.messages]
+        .reverse()
+        .find((message) => message.runtime_session_id)?.runtime_session_id || ''
       await scrollToBottom()
     }
   } catch (e) {
@@ -87,9 +107,31 @@ async function prepareSession(reportId: number | null) {
 }
 
 async function sendCurrentMessage() {
+  const reportId = props.reportId
   const question = input.value.trim()
-  if (!props.reportId || !sessionId.value || !question || sending.value) {
+  if (!reportId || !question || sending.value) {
     return
+  }
+
+  sending.value = true
+  error.value = ''
+
+  let currentSessionId = sessionId.value
+  if (!currentSessionId) {
+    try {
+      const session = await createReportChatSession(reportId, effectiveUserId.value)
+      if (activeReportId.value !== reportId) {
+        sending.value = false
+        return
+      }
+      currentSessionId = session.session_id
+      conversationId.value = session.conversation_id
+      sessionId.value = currentSessionId
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : '创建报告追问会话失败'
+      sending.value = false
+      return
+    }
   }
 
   const now = new Date().toISOString()
@@ -103,35 +145,96 @@ async function sendCurrentMessage() {
     rag_source_refs: [],
     rag_sources: [],
   })
+  const assistantIndex = messages.value.length
+  messages.value.push({
+    role: 'assistant',
+    content: '',
+    evidence_refs: [],
+    question_scope: null,
+    created_at: now,
+    used_rag: false,
+    rag_source_refs: [],
+    rag_sources: [],
+  })
   input.value = ''
-  sending.value = true
-  error.value = ''
+  streamCompleted = false
   await scrollToBottom()
 
-  try {
-    const response = await sendReportChatMessage({
-      sessionId: sessionId.value,
-      reportId: props.reportId,
-      question,
-    })
-    lastTraceId.value = response.trace_id
-    messages.value.push({
-      role: 'assistant',
-      content: response.answer,
-      evidence_refs: response.evidence_refs,
-      question_scope: response.question_scope,
-      created_at: new Date().toISOString(),
-      used_rag: response.used_rag,
-      rag_source_refs: response.rag_source_refs,
-      rag_sources: response.rag_sources,
-    })
-    await scrollToBottom()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '发送追问失败'
-  } finally {
-    sending.value = false
-  }
+  const expectedReportId = reportId
+  const expectedSessionId = currentSessionId
+  streamController = streamReportChatMessage({
+    sessionId: expectedSessionId,
+    reportId: expectedReportId,
+    question,
+  }, {
+    onStarted(traceId) {
+      if (!isActiveStream(expectedReportId, expectedSessionId)) return
+      lastTraceId.value = traceId
+    },
+    onDelta(delta) {
+      if (!isActiveStream(expectedReportId, expectedSessionId)) return
+      const message = messages.value[assistantIndex]
+      if (message) message.content += delta
+      void scrollToBottom()
+    },
+    onReset() {
+      if (!isActiveStream(expectedReportId, expectedSessionId)) return
+      const message = messages.value[assistantIndex]
+      if (message) message.content = ''
+    },
+    onCompleted(response) {
+      if (!isActiveStream(expectedReportId, expectedSessionId)) return
+      streamCompleted = true
+      lastTraceId.value = response.trace_id
+      conversationId.value = response.conversation_id
+      lastRuntimeSessionId.value = response.runtime_session_id
+      const message = messages.value[assistantIndex]
+      if (message) {
+        message.content = response.answer
+        message.evidence_refs = response.evidence_refs
+        message.question_scope = response.question_scope
+        message.used_rag = response.used_rag
+        message.rag_source_refs = response.rag_source_refs
+        message.rag_sources = response.rag_sources
+      }
+      finishStream()
+      void scrollToBottom()
+    },
+    onError(streamError) {
+      if (!isActiveStream(expectedReportId, expectedSessionId)) return
+      streamCompleted = true
+      error.value = streamError.message
+      const message = messages.value[assistantIndex]
+      if (message && !message.content) messages.value.splice(assistantIndex, 1)
+      finishStream()
+    },
+    onClose() {
+      if (!isActiveStream(expectedReportId, expectedSessionId)) return
+      if (!streamCompleted) {
+        error.value = '回答流已中断，请重新发送问题'
+        finishStream()
+      }
+    },
+  })
 }
+
+function isActiveStream(reportId: number, streamSessionId: string): boolean {
+  return activeReportId.value === reportId && sessionId.value === streamSessionId
+}
+
+function finishStream() {
+  streamController = null
+  sending.value = false
+}
+
+function cancelActiveStream() {
+  streamController?.abort()
+  streamController = null
+  streamCompleted = false
+  sending.value = false
+}
+
+onUnmounted(cancelActiveStream)
 
 function askQuickQuestion(question: string) {
   if (sending.value || loadingSession.value) {
@@ -142,7 +245,7 @@ function askQuickQuestion(question: string) {
 }
 
 function renderAssistantMarkdown(text: string): string {
-  return marked.parse(text.replace(/</g, '&lt;'), { async: false, gfm: true }) as string
+  return renderSafeMarkdown(text)
 }
 
 function scopeLabel(scope: ReportQuestionScope | null): string {
@@ -187,6 +290,24 @@ async function scrollToBottom() {
     messageListRef.value.scrollTop = messageListRef.value.scrollHeight
   }
 }
+
+function resolveReportChatUserId(explicitUserId: string): string {
+  const normalized = explicitUserId.trim()
+  if (normalized && normalized !== 'anonymous') {
+    return normalized
+  }
+
+  const storageKey = 'ioc-report-chat-user-id'
+  try {
+    const existing = window.localStorage.getItem(storageKey)
+    if (existing) return existing
+    const generated = `visitor_${crypto.randomUUID()}`
+    window.localStorage.setItem(storageKey, generated)
+    return generated
+  } catch {
+    return fallbackVisitorId
+  }
+}
 </script>
 
 <template>
@@ -221,7 +342,7 @@ async function scrollToBottom() {
       </div>
 
       <div ref="messageListRef" class="report-chat__messages">
-        <div v-if="loadingSession" class="report-chat__state">正在创建报告会话...</div>
+        <div v-if="loadingSession" class="report-chat__state">正在加载报告会话...</div>
         <div v-else-if="messages.length === 0" class="report-chat__state">
           可以直接输入问题，也可以点击上方快捷问题开始。
         </div>
@@ -239,6 +360,7 @@ async function scrollToBottom() {
           <div
             v-if="message.role === 'assistant'"
             class="chat-message__bubble markdown-content"
+            :class="{ 'chat-message__bubble--streaming': sending && index === messages.length - 1 }"
             v-html="renderAssistantMarkdown(message.content)"
           />
           <div v-else class="chat-message__bubble">{{ message.content }}</div>
@@ -263,7 +385,12 @@ async function scrollToBottom() {
           </div>
         </article>
 
-        <div v-if="sending" class="report-chat__state">AI 正在基于报告生成回答...</div>
+        <div
+          v-if="sending && !messages[messages.length - 1]?.content"
+          class="report-chat__state report-chat__state--streaming"
+        >
+          AI 正在分析报告依据，首段内容即将返回...
+        </div>
       </div>
 
       <p v-if="error" class="report-chat__error">{{ error }}</p>
@@ -282,8 +409,10 @@ async function scrollToBottom() {
         </button>
       </form>
 
-      <div v-if="sessionId || lastTraceId" class="report-chat__debug">
-        <span v-if="sessionId">Session: <code>{{ sessionId }}</code></span>
+      <div v-if="conversationId || sessionId || lastRuntimeSessionId || lastTraceId" class="report-chat__debug">
+        <span v-if="conversationId">Conversation: <code>{{ conversationId }}</code></span>
+        <span v-if="sessionId">Report Session: <code>{{ sessionId }}</code></span>
+        <span v-if="lastRuntimeSessionId">Runtime Session: <code>{{ lastRuntimeSessionId }}</code></span>
         <span v-if="lastTraceId">Trace: <code>{{ lastTraceId }}</code></span>
       </div>
     </template>
@@ -439,6 +568,27 @@ async function scrollToBottom() {
 .chat-message--user .chat-message__bubble {
   background: #eef2ff;
   border-color: #c7d2fe;
+}
+
+.chat-message__bubble--streaming::after {
+  animation: stream-cursor-blink 0.9s steps(1) infinite;
+  background: #6366f1;
+  content: '';
+  display: inline-block;
+  height: 1em;
+  margin-left: 3px;
+  vertical-align: -0.12em;
+  width: 2px;
+}
+
+.report-chat__state--streaming {
+  padding: 8px 12px;
+  text-align: left;
+}
+
+@keyframes stream-cursor-blink {
+  0%, 45% { opacity: 1; }
+  46%, 100% { opacity: 0; }
 }
 
 .evidence-refs {

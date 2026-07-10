@@ -7,7 +7,7 @@ from app.config.settings import settings
 from app.db.base import Base
 from app.models import SystemItem
 from app.runtime.models import AiConversation, AiSession, AiPrompt, AiTrace, AiFeedback
-from app.operation_agent.models import OperationAnalysisRecord, OperationReportFile, OperationDownloadLog, OperationAiUsageRecord
+from app.operation_agent.models import AnalysisEvent, OperationAnalysisRecord, OperationReportFile, OperationDownloadLog, OperationAiUsageRecord
 from app.report_chat_agent.models import ReportChatMessage, ReportChatSession
 
 config = context.config

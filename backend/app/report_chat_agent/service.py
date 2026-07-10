@@ -2,6 +2,7 @@ from app.report_chat_agent.graph import report_chat_graph
 from app.db.session import get_session_local
 from app.report_chat_agent.repositories import report_chat_repo
 from app.report_chat_agent.state import ReportChatState
+from app.security.content_moderator import ModerationAction, content_moderator
 from app.utils.ids import new_trace_id
 
 
@@ -16,6 +17,7 @@ def create_chat_session(report_id: int, user_id: str = "anonymous") -> dict:
             scene="essential_safety",
         )
         return {
+            "conversation_id": session.conversation_id,
             "session_id": session.id,
             "report_id": session.report_id,
             "title": session.title,
@@ -75,11 +77,30 @@ def send_chat_message(
     report_id: int,
     question: str,
     user_id: str = "anonymous",
+    trace_id: str | None = None,
 ) -> ReportChatState:
+    current_trace_id = trace_id or new_trace_id()
+    db = get_session_local()()
+    try:
+        session = report_chat_repo.get_session(db, session_id)
+        if session is None:
+            raise ValueError(f"报告会话不存在: {session_id}")
+        runtime_session = report_chat_repo.begin_turn(
+            db,
+            session=session,
+            question=question,
+            trace_id=current_trace_id,
+        )
+        runtime_session_id = runtime_session.id
+    finally:
+        db.close()
+
     initial_state: ReportChatState = {
-        "trace_id": new_trace_id(),
+        "trace_id": current_trace_id,
         "report_id": str(report_id),
+        "conversation_id": session.conversation_id,
         "session_id": session_id,
+        "runtime_session_id": runtime_session_id,
         "user_id": user_id,
         "user_question": question,
         "scene": "essential_safety",
@@ -111,6 +132,58 @@ def send_chat_message(
         "llm_usages": [],
     }
 
-    result = report_chat_graph.invoke(initial_state)
+    moderation = content_moderator.moderate(question)
+    if moderation.action in (ModerationAction.BLOCK, ModerationAction.ESCALATE):
+        initial_state["final_answer"] = moderation.message or "您的输入包含违规内容，已被系统拦截。"
+        initial_state["question_scope"] = "out_of_scope"
+        initial_state["answer_type"] = "boundary"
+        blocked_db = get_session_local()()
+        try:
+            message = report_chat_repo.complete_turn(
+                blocked_db,
+                session_id=session_id,
+                runtime_session_id=runtime_session_id,
+                report_id=report_id,
+                content=initial_state["final_answer"],
+                trace_id=current_trace_id,
+                question_scope="out_of_scope",
+                answer_type="boundary",
+                evidence_refs=[],
+                query_scope={},
+                used_rag=False,
+                rag_source_refs=[],
+                rag_sources=[],
+            )
+            initial_state["message_id"] = message.id
+        finally:
+            blocked_db.close()
+        return initial_state
+
+    try:
+        result = report_chat_graph.invoke(initial_state)
+    except Exception as exc:
+        failed_db = get_session_local()()
+        try:
+            report_chat_repo.fail_turn(
+                failed_db,
+                runtime_session_id=runtime_session_id,
+                error_message=str(exc),
+            )
+        finally:
+            failed_db.close()
+        raise
+
+    if not result.get("message_id"):
+        failed_db = get_session_local()()
+        try:
+            report_chat_repo.fail_turn(
+                failed_db,
+                runtime_session_id=runtime_session_id,
+                error_message="报告问答流程结束但未生成可持久化回答",
+            )
+        finally:
+            failed_db.close()
+        raise RuntimeError("报告问答流程结束但未生成可持久化回答")
+
     save_report_chat_usage(result)
     return result

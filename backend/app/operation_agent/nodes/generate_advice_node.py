@@ -6,6 +6,7 @@ from pathlib import Path
 from app.config.settings import settings
 from app.operation_agent.state import OperationState
 from app.runtime.llm.client import LlmResult, llm_client
+from app.security.content_moderator import ModerationAction, content_moderator
 
 _PROMPT_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
@@ -76,6 +77,12 @@ def generate_advice_node(state: OperationState) -> OperationState:
 
     state["llm_usages"] = llm_usages
     state["errors"] = errors
+
+    advice_text = json.dumps(state.get("advice_items", []), ensure_ascii=False)
+    moderation = content_moderator.moderate_output(advice_text)
+    if moderation.action in (ModerationAction.MASK, ModerationAction.BLOCK):
+        state["advice_items"] = []
+
     return state
 
 

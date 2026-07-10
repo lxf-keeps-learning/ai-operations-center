@@ -17,8 +17,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.tool_center.core.exceptions import ToolNotFoundError
-from app.tool_center.core.schemas import BaseToolInput, ToolResult
+from app.tool_center.exceptions import ToolNotFoundError
+from app.tool_center.contracts import BaseToolInput, ToolResult
 from app.tool_center.registry import registry
 from app.tools.analysis.ioc_summary_tool import AnalysisInput
 from app.tools.register import register_all_tools

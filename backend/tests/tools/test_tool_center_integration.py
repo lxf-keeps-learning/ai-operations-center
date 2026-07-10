@@ -8,8 +8,8 @@ import pytest
 
 from app.integrations.ioc.schema import IocApiResponse
 from app.integrations.ioc.mock_client import MockIocApiClient
-from app.tool_center.core.exceptions import ToolNotFoundError
-from app.tool_center.core.schemas import BaseToolInput, ToolContext
+from app.tool_center.exceptions import ToolNotFoundError
+from app.tool_center.contracts import BaseToolInput, ToolContext
 from app.tool_center.registry import registry
 from app.tools.analysis.ioc_summary_tool import AnalysisInput
 from app.tools.query.kpi_tool import KpiQueryTool

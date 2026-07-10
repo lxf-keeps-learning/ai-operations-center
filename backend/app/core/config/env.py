@@ -1,3 +1,10 @@
+"""
+环境配置模块 — 负责多环境识别与 .env 文件路径解析
+
+支持 dev / test / prod / local 四种环境，通过 APP_ENV 环境变量控制。
+提供当前环境判断、环境文件路径查找等基础能力。
+"""
+
 import os
 from functools import lru_cache
 from pathlib import Path

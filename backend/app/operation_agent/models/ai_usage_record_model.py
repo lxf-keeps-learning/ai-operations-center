@@ -1,3 +1,10 @@
+"""
+OperationAiUsageRecord — AI 用量记录模型
+
+记录每次运营分析中 LLM 调用的 Token 使用量和费用。
+每次分析可能包含多次 LLM 调用（原因分析 + 建议生成），每次调用一条记录。
+"""
+
 from datetime import datetime
 
 from sqlalchemy import DateTime, Text, BigInteger, String, Integer, Float, SmallInteger
@@ -23,6 +30,7 @@ class OperationAiUsageRecord(Base):
     model_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
     model_name: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
 
+    # ── Token 与费用 ──
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
@@ -31,6 +39,7 @@ class OperationAiUsageRecord(Base):
     output_cost: Mapped[float] = mapped_column(Float(12, 6), default=0)
     total_cost: Mapped[float] = mapped_column(Float(12, 6), default=0)
 
+    # ── 状态 ──
     success: Mapped[int] = mapped_column(SmallInteger, default=1)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 

@@ -18,7 +18,9 @@ class ReportChatState(TypedDict, total=False):
     trace_id: str
 
     report_id: str
+    conversation_id: str
     session_id: str
+    runtime_session_id: str
     user_id: str
     user_question: str
 

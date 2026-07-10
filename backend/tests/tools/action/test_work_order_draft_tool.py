@@ -1,5 +1,5 @@
 from app.integrations.ioc.mock_client import MockIocApiClient
-from app.tool_center.core.schemas import BaseToolInput
+from app.tool_center.contracts import BaseToolInput
 from app.tool_center.registry import registry
 from app.tools.action.work_order_draft_tool import WorkOrderDraftActionTool, WorkOrderDraftInput
 from app.tools.register import register_all_tools

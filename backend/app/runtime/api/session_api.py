@@ -1,3 +1,10 @@
+"""
+Session 管理接口 — 运行记录 CRUD
+
+Session 代表一次 AI 对话或分析任务的执行记录。
+提供创建、查询、更新状态、更新输出等操作。
+"""
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 

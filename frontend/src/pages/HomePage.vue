@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
+import RuntimeChatPanel from '@/components/RuntimeChatPanel.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { useAppStore } from '@/stores/app'
 
@@ -11,6 +12,7 @@ type RightTabKey = 'credential' | 'analysis' | 'iot'
 
 const appStore = useAppStore()
 const activeDomain = ref<DomainKey>('safety')
+const chatDrawerOpen = ref(false)
 const timeDimension = ref('月维度')
 const currentDate = ref('2026-05')
 const currentCategory = ref('全部')
@@ -449,6 +451,27 @@ onMounted(() => {
         </RouterLink>
       </aside>
     </section>
+    <!-- Chat drawer trigger button -->
+    <button class="chat-fab" type="button" @click="chatDrawerOpen = true" aria-label="打开 AI 对话">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+      </svg>
+    </button>
+
+    <!-- Chat drawer overlay -->
+    <Teleport to="body">
+      <div v-if="chatDrawerOpen" class="chat-drawer-overlay" @click.self="chatDrawerOpen = false">
+        <div class="chat-drawer">
+          <div class="chat-drawer__header">
+            <span>AI 对话</span>
+            <button class="chat-drawer__close" type="button" @click="chatDrawerOpen = false">&times;</button>
+          </div>
+          <div class="chat-drawer__body">
+            <RuntimeChatPanel promptCode="runtime_chat" />
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1110,6 +1133,99 @@ onMounted(() => {
 
   .top-indicator strong {
     font-size: 22px;
+  }
+}
+
+/* ---- Chat FAB (floating action button) ---- */
+.chat-fab {
+  align-items: center;
+  background: #3730a3;
+  border: none;
+  border-radius: 50%;
+  bottom: 24px;
+  box-shadow: 0 6px 20px rgba(55, 48, 163, 0.4);
+  color: #ffffff;
+  cursor: pointer;
+  display: flex;
+  height: 52px;
+  justify-content: center;
+  position: fixed;
+  right: 24px;
+  transition: transform 0.2s, box-shadow 0.2s;
+  width: 52px;
+  z-index: 100;
+}
+
+.chat-fab:hover {
+  box-shadow: 0 8px 28px rgba(55, 48, 163, 0.55);
+  transform: scale(1.08);
+}
+
+/* ---- Chat Drawer ---- */
+.chat-drawer-overlay {
+  background: rgba(0, 0, 0, 0.35);
+  inset: 0;
+  position: fixed;
+  z-index: 1000;
+}
+
+.chat-drawer {
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  position: fixed;
+  right: 0;
+  top: 0;
+  width: 460px;
+  z-index: 1001;
+}
+
+.chat-drawer__header {
+  align-items: center;
+  border-bottom: 1px solid var(--color-border, #dbe8f5);
+  display: flex;
+  font-size: 16px;
+  font-weight: 800;
+  justify-content: space-between;
+  padding: 16px 20px;
+}
+
+.chat-drawer__close {
+  background: none;
+  border: none;
+  color: #66788d;
+  cursor: pointer;
+  font-size: 28px;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.chat-drawer__close:hover {
+  color: #1c2b3f;
+}
+
+.chat-drawer__body {
+  flex: 1;
+  overflow: hidden;
+  padding: 16px 20px;
+}
+
+/* Override RuntimeChatPanel height inside the drawer */
+.chat-drawer__body :deep(.chat-panel) {
+  height: 100%;
+}
+
+@media (max-width: 540px) {
+  .chat-drawer {
+    width: 100vw;
+  }
+
+  .chat-fab {
+    bottom: 16px;
+    right: 16px;
+    height: 46px;
+    width: 46px;
   }
 }
 </style>

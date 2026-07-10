@@ -12,6 +12,7 @@ class ReportChatMessage(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     session_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    runtime_session_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     report_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     role: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)

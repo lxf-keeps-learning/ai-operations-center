@@ -1,3 +1,15 @@
+"""
+AI Agent 接口 — 对话/分析/SSE 流式输出
+
+提供三个核心 AI 能力接口：
+  POST /agent/chat       AI 对话（创建 Chat 任务）
+  POST /agent/analyze    AI 分析（创建 Analyze 任务）
+  GET  /agent/stream     SSE 流式输出（按 traceId 拉取实时事件流）
+
+对话和分析任务通过 agent_service 创建并异步执行，
+流式输出通过 SSE (Server-Sent Events) 协议实时推送 Token。
+"""
+
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 

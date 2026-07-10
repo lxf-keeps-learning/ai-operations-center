@@ -1,3 +1,10 @@
+"""
+Conversation 管理接口 — 会话 CRUD
+
+Conversation 代表一次完整的对话过程，包含多个 Session（多次问答）。
+提供创建、查询、更新状态等操作。
+"""
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 

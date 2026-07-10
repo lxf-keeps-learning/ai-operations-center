@@ -1,9 +1,9 @@
 import pytest
 
-from app.tool_center.core.base_tool import BaseTool
-from app.tool_center.core.exceptions import ToolNotFoundError
-from app.tool_center.core.registry import ToolRegistry
-from app.tool_center.core.schemas import BaseToolInput, Evidence
+from app.tool_center.base_tool import BaseTool
+from app.tool_center.exceptions import ToolNotFoundError
+from app.tool_center.registry import ToolRegistry
+from app.tool_center.contracts import BaseToolInput, Evidence
 
 
 class MockTool(BaseTool):

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { marked } from 'marked'
 
 import { getRecordDetail, listRecords, type AnalysisRecord, type AnalysisRecordDetail } from '@/api/records'
 import ReportChatPanel from '@/components/ReportChatPanel.vue'
+import { renderSafeMarkdown } from '@/utils/markdown'
 
 const domainTabs = [
   { key: '', label: '全部' },
@@ -101,7 +101,7 @@ function switchDomain(domain: string) {
 
 function renderMd(text: string | null): string {
   if (!text) return ''
-  return marked.parse(text.replace(/</g, '&lt;'), { async: false, gfm: true }) as string
+  return renderSafeMarkdown(text)
 }
 
 function normalizeQueryId(value: unknown): number | null {

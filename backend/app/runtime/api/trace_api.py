@@ -1,3 +1,10 @@
+"""
+Trace 管理接口 — 全链路追踪记录 CRUD
+
+Trace 记录一次请求从 API → Service → Graph → Tool → LLM 的完整链路。
+每个 Span 代表链路中的一个环节，通过 trace_id + parent_span_id 串联。
+"""
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 

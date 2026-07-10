@@ -24,29 +24,10 @@ export const useOperationStore = defineStore('operation', () => {
   const currentParams = ref<OperationAnalyzeParams | null>(null)
   const currentKey = ref('')
 
-  let stepTimer: ReturnType<typeof setInterval> | null = null
   let requestSeq = 0
-
-  function startStepProgress() {
-    stopStepProgress()
-    currentStep.value = 0
-    stepTimer = setInterval(() => {
-      if (currentStep.value < STEPS.length - 1) {
-        currentStep.value++
-      }
-    }, 4000)
-  }
-
-  function stopStepProgress() {
-    if (stepTimer) {
-      clearInterval(stepTimer)
-      stepTimer = null
-    }
-  }
 
   function reset() {
     requestSeq++
-    stopStepProgress()
     result.value = null
     loading.value = false
     error.value = ''
@@ -64,7 +45,6 @@ export const useOperationStore = defineStore('operation', () => {
     currentStep.value = 0
     currentParams.value = { ...params }
     currentKey.value = key
-    startStepProgress()
 
     try {
       const data = await analyzeOperation(params)
@@ -81,9 +61,28 @@ export const useOperationStore = defineStore('operation', () => {
     } finally {
       if (seq === requestSeq) {
         loading.value = false
-        stopStepProgress()
       }
     }
+  }
+
+  function applyStreamResult(
+    data: OperationResult,
+    params: OperationAnalyzeParams,
+    key = buildRequestKey(params),
+  ) {
+    requestSeq++
+    result.value = data
+    loading.value = false
+    error.value = ''
+    currentStep.value = STEPS.length - 1
+    currentParams.value = { ...params }
+    currentKey.value = key
+  }
+
+  function applyStreamError(message: string) {
+    requestSeq++
+    loading.value = false
+    error.value = message
   }
 
   return {
@@ -95,6 +94,8 @@ export const useOperationStore = defineStore('operation', () => {
     currentKey,
     steps: STEPS,
     analyze,
+    applyStreamResult,
+    applyStreamError,
     reset,
   }
 })

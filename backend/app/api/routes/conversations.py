@@ -1,3 +1,14 @@
+"""
+会话管理接口 — 查询/删除 AI 对话会话
+
+提供会话的 CR 操作（D 删除）：
+  GET    /conversations         分页查询会话列表（按 agent_code 过滤）
+  GET    /conversations/{id}    查询会话详情（含消息记录）
+  DELETE /conversations/{id}    删除会话
+
+会话数据的持久化在 agent_service 中完成。
+"""
+
 from fastapi import APIRouter, HTTPException, Query
 
 from app.application.agent_service import agent_service

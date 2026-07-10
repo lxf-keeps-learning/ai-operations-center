@@ -14,6 +14,7 @@ class SessionRecord:
     scene_code: str
     message: str | None
     status: str = "running"
+    output: str = ""
     create_time: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
@@ -74,6 +75,11 @@ class InMemoryRuntimeStore:
         session = self.sessions_by_trace.get(trace_id)
         if session is not None:
             session.status = status
+
+    def set_session_output(self, trace_id: str, output: str) -> None:
+        session = self.sessions_by_trace.get(trace_id)
+        if session is not None:
+            session.output = output
 
     def list_conversations(
         self,

@@ -9,16 +9,24 @@ OperationService — 运营分析业务入口。
 5. 支持 30 分钟内相同参数的缓存复用。
 6. 返回完整的 OperationState 供 API 层提取结果。
 """
+import logging
+
 from app.db.session import get_session_local
 from app.operation_agent.graph import operation_graph
 from app.operation_agent.schemas.request import OperationAnalyzeRequest
-from app.operation_agent.schemas.response import OperationAnalyzeResponse
 from app.operation_agent.services.record_service import get_cached_result, save_analysis_result
 from app.operation_agent.state import OperationState
+from app.security.content_moderator import ModerationAction, content_moderator
 from app.utils.ids import new_trace_id
 
+logger = logging.getLogger(__name__)
 
-def analyze_operation(request: OperationAnalyzeRequest, user_context: dict | None = None) -> OperationState:
+
+def analyze_operation(
+    request: OperationAnalyzeRequest,
+    user_context: dict | None = None,
+    trace_id: str | None = None,
+) -> OperationState:
     """
     执行一次运营分析。
 
@@ -37,17 +45,28 @@ def analyze_operation(request: OperationAnalyzeRequest, user_context: dict | Non
     }
 
     if not request.force_refresh:
-        db = get_session_local()()
+        db = None
         try:
+            db = get_session_local()()
             cached = get_cached_result(db, page_context)
             if cached:
                 return state_from_record(cached, page_context, user_context or {})
+        except Exception:
+            logger.warning("读取运营分析缓存失败，继续执行实时分析", exc_info=True)
         finally:
-            db.close()
+            if db is not None:
+                db.close()
+
+    user_q = request.user_question
+    if user_q:
+        moderation = content_moderator.moderate(user_q)
+        if moderation.action in (ModerationAction.BLOCK, ModerationAction.ESCALATE):
+            return _blocked_result(trace_id, request, user_context, page_context, moderation.message)
 
     initial_state: OperationState = {
+        "trace_id": trace_id or new_trace_id(),
         "trigger_type": request.trigger_type,
-        "user_question": request.user_question,
+        "user_question": user_q,
         "user_context": user_context or {},
         "page_context": page_context,
         "llm_usages": [],
@@ -60,8 +79,9 @@ def analyze_operation(request: OperationAnalyzeRequest, user_context: dict | Non
     status = "failed" if errors and not result.get("final_answer") else "partial" if errors else "success"
     error_msg = errors[0].get("message") if errors else None
 
-    db2 = get_session_local()()
+    db2 = None
     try:
+        db2 = get_session_local()()
         saved = save_analysis_result(
             db2,
             trace_id=trace_id,
@@ -73,10 +93,39 @@ def analyze_operation(request: OperationAnalyzeRequest, user_context: dict | Non
             user_context=user_context,
         )
         result["record_id"] = saved.id
+    except Exception:
+        logger.warning("保存运营分析结果失败，返回未持久化结果", exc_info=True)
     finally:
-        db2.close()
+        if db2 is not None:
+            db2.close()
 
     return result
+
+
+def _blocked_result(
+    trace_id: str | None,
+    request: OperationAnalyzeRequest,
+    user_context: dict | None,
+    page_context: dict,
+    message: str | None,
+) -> OperationState:
+    return {
+        "trace_id": trace_id or new_trace_id(),
+        "trigger_type": request.trigger_type,
+        "user_question": request.user_question,
+        "user_context": user_context or {},
+        "page_context": page_context,
+        "raw_data": {},
+        "metrics": [],
+        "abnormal_items": [],
+        "reason_analysis": "",
+        "risk_items": [],
+        "advice_items": [],
+        "evidence": [],
+        "final_answer": message or "您的输入包含违规内容，已被系统拦截。",
+        "llm_usages": [],
+        "errors": [],
+    }
 
 
 def state_from_record(record, page_context: dict, user_context: dict) -> OperationState:

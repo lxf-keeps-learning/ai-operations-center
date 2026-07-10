@@ -1,7 +1,7 @@
 from pydantic import ValidationError
 import pytest
 
-from app.tool_center.core.schemas import BaseToolInput, Evidence, ToolContext, ToolError, ToolResult
+from app.tool_center.contracts import BaseToolInput, Evidence, ToolContext, ToolError, ToolResult
 
 
 class TestToolSchema:

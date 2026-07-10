@@ -1,3 +1,5 @@
+"""TraceRepository — 全链路追踪数据访问层"""
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -62,6 +64,7 @@ class TraceRepository:
         return record
 
     def list_by_trace_id(self, db: Session, trace_id: str) -> list[AiTrace]:
+        """按 trace_id 查询整条链路的所有 Span，按创建时间升序"""
         stmt = (
             select(AiTrace)
             .where(AiTrace.trace_id == trace_id)
@@ -70,6 +73,7 @@ class TraceRepository:
         return list(db.scalars(stmt).all())
 
     def list_by_session_id(self, db: Session, session_id: str) -> list[AiTrace]:
+        """按 session_id 查询某次运行的所有 Trace 记录"""
         stmt = (
             select(AiTrace)
             .where(AiTrace.session_id == session_id)

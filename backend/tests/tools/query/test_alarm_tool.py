@@ -2,7 +2,7 @@ from app.integrations.ioc.client import IocApiClient
 from app.integrations.ioc.mock_client import MockIocApiClient
 from app.integrations.ioc.schema import IocApiResponse
 from app.tool_center.registry import registry
-from app.tool_center.core.schemas import BaseToolInput
+from app.tool_center.contracts import BaseToolInput
 from app.tools.query.alarm_tool import AlarmQueryTool
 from app.tools.register import register_all_tools
 

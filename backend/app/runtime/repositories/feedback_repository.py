@@ -1,3 +1,5 @@
+"""FeedbackRepository — 用户反馈数据访问层"""
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -39,5 +41,6 @@ class FeedbackRepository:
         return self.get_by_id(db, feedback_id)
 
     def list_by_session_id(self, db: Session, session_id: str) -> list[AiFeedback]:
+        """查询某次运行的所有反馈记录"""
         stmt = select(AiFeedback).where(AiFeedback.session_id == session_id).order_by(AiFeedback.created_at.desc())
         return list(db.scalars(stmt).all())

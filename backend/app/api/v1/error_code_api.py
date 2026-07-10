@@ -1,3 +1,10 @@
+"""
+错误码查询接口 — GET /errors/codes
+
+返回系统中所有已注册的业务错误码列表（code / message / httpStatus / description）。
+前端用于错误码说明页面展示和错误提示信息的国际化。
+"""
+
 from fastapi import APIRouter
 
 from app.core.exception.error_code import ALL_CODES

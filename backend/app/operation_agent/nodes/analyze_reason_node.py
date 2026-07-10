@@ -6,6 +6,7 @@ from pathlib import Path
 from app.config.settings import settings
 from app.operation_agent.state import OperationState
 from app.runtime.llm.client import LlmResult, llm_client
+from app.security.content_moderator import ModerationAction, content_moderator
 
 _PROMPT_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
@@ -82,6 +83,13 @@ def analyze_reason_node(state: OperationState) -> OperationState:
 
     state["llm_usages"] = llm_usages
     state["errors"] = errors
+
+    moderation = content_moderator.moderate_output(state.get("reason_analysis", ""))
+    if moderation.action == ModerationAction.MASK and moderation.masked_text:
+        state["reason_analysis"] = moderation.masked_text
+    elif moderation.action == ModerationAction.BLOCK:
+        state["reason_analysis"] = "原因分析内容已被安全策略过滤。"
+
     return state
 
 

@@ -1,3 +1,18 @@
+/**
+ * HTTP 请求工具 — 统一封装 fetch，注入 X-Trace-Id 请求头
+ *
+ * 所有 API 请求均通过此模块发起，统一处理：
+ *   1. 自动注入 traceId（前后端全链路追踪）
+ *   2. 统一超时控制（默认 15s）
+ *   3. 统一错误处理（ApiRequestError）
+ *   4. 业务错误码判断（code !== 0 视为失败）
+ *   5. 自动解析后端统一响应格式 { code, message, traceId, data }
+ *
+ * 使用方法：
+ *   import { request } from '@/utils/request'
+ *   const data = await request<ResponseType>('/path/to/api', { method: 'POST', body: JSON.stringify(params) })
+ */
+
 import { createTraceId, setLastTraceId } from '@/utils/trace'
 
 const DEFAULT_TIMEOUT = 15_000

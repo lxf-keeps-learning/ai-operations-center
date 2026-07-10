@@ -22,7 +22,10 @@ _TRIGGER_MODE_MAP = {
 
 def init_context_node(state: OperationState) -> OperationState:
     """初始化 State：设置 trace_id、analysis_mode，填充空容器。"""
-    state["trace_id"] = new_trace_id()
+    # API/SSE 入口已建立 trace 时必须沿用，保证 HTTP、Graph、持久化记录和
+    # 流式 run_id 可以用同一个标识串联；直接调用 Graph 时再生成新 ID。
+    if not state.get("trace_id"):
+        state["trace_id"] = new_trace_id()
     trigger = state.get("trigger_type", "tab_analysis")
     state["analysis_mode"] = _TRIGGER_MODE_MAP.get(trigger, "domain_focus")
 

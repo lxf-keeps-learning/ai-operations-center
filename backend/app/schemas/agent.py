@@ -36,3 +36,4 @@ class StreamEvent(IocBaseModel):
     status: str | None = None
     code: int | None = None
     stage: str | None = None
+    duration_ms: int | None = Field(default=None, alias="durationMs")

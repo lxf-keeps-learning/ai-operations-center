@@ -1,3 +1,10 @@
+"""
+AiFeedback — 用户反馈模型
+
+用户对 AI 回复的评价记录，包含评分（1-5星）、反馈类型（不准确/不完整/有用等）、文字内容。
+用于后续模型效果评估和 Prompt 优化。
+"""
+
 from datetime import datetime
 
 from sqlalchemy import DateTime, Integer, String, Text

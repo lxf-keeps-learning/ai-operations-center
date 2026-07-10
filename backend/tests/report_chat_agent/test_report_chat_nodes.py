@@ -11,7 +11,9 @@ from app.report_chat_agent.nodes.classify_question_scope_node import classify_qu
 from app.report_chat_agent.nodes.generate_report_answer_node import generate_report_answer_node
 from app.report_chat_agent.nodes.persist_chat_message_node import persist_chat_message_node
 from app.report_chat_agent.repositories import report_chat_repo
+from app.report_chat_agent.service import send_chat_message
 from app.report_chat_agent.state import ReportChatState
+from app.runtime.models import AiConversation, AiSession
 
 _REPORT_CHAT_MODELS = (ReportChatSession, ReportChatMessage)
 
@@ -30,6 +32,10 @@ def report_chat_db(
     )
     monkeypatch.setattr(
         "app.report_chat_agent.nodes.persist_chat_message_node.get_session_local",
+        lambda: session_local,
+    )
+    monkeypatch.setattr(
+        "app.report_chat_agent.service.get_session_local",
         lambda: session_local,
     )
 
@@ -108,11 +114,55 @@ def test_persist_chat_message_saves_user_and_assistant_messages(
     messages = report_chat_repo.list_messages(report_chat_db, "session_test_report_chat")
     assert session is not None
     assert session.report_id == 1
+    assert session.conversation_id is not None
     assert [message.role for message in messages] == ["user", "assistant"]
+    assert messages[0].runtime_session_id == messages[1].runtime_session_id
     assert messages[1].evidence_refs == ["EV_001"]
     assert messages[1].query_scope["used_rag"] is True
     assert messages[1].query_scope["rag_source_refs"] == ["DOC_001_CHUNK_003"]
     assert messages[1].trace_id == "trace_test_report_chat"
+    conversation = report_chat_db.get(AiConversation, session.conversation_id)
+    runtime_session = report_chat_db.get(AiSession, messages[0].runtime_session_id)
+    assert conversation is not None
+    assert conversation.biz_type == "report_chat"
+    assert runtime_session is not None
+    assert runtime_session.status == "success"
+    assert runtime_session.output_text == "根据当前报告，风险排序依据为..."
+
+
+def test_send_chat_message_records_failed_runtime_session(
+    report_chat_db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report_session = report_chat_repo.create_session(
+        report_chat_db,
+        report_id=1,
+        user_id="tester",
+    )
+
+    class FailingGraph:
+        @staticmethod
+        def invoke(_state):
+            raise RuntimeError("模型连接失败")
+
+    monkeypatch.setattr("app.report_chat_agent.service.report_chat_graph", FailingGraph())
+
+    with pytest.raises(RuntimeError, match="模型连接失败"):
+        send_chat_message(
+            session_id=report_session.id,
+            report_id=1,
+            question="为什么是高风险？",
+            user_id="tester",
+            trace_id="trace_failed_report_chat",
+        )
+
+    messages = report_chat_repo.list_messages(report_chat_db, report_session.id)
+    assert [message.role for message in messages] == ["user"]
+    runtime_session = report_chat_db.get(AiSession, messages[0].runtime_session_id)
+    assert runtime_session is not None
+    assert runtime_session.status == "failed"
+    assert runtime_session.input_text == "为什么是高风险？"
+    assert runtime_session.error_message == "模型连接失败"
 
 
 def test_create_session_reuses_recent_report_user_session(report_chat_db: Session) -> None:

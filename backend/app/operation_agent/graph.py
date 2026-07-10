@@ -9,6 +9,9 @@ Operation Graph — 运营分析智能体的编排核心。
 每个节点接收 OperationState 并返回更新后的 OperationState。
 State 是模块间传递数据的唯一契约，节点之间不直接调用。
 """
+from collections.abc import Callable
+from itertools import pairwise
+
 from langgraph.graph import END, StateGraph, START
 
 from app.operation_agent.nodes.analyze_reason_node import analyze_reason_node
@@ -20,6 +23,20 @@ from app.operation_agent.nodes.summary_node import summary_node
 from app.operation_agent.state import OperationState
 
 
+OperationNode = Callable[[OperationState], OperationState]
+
+# 同步 Graph 和 SSE runner 共用这一份节点定义，避免新增、删除或重排节点时
+# 两条执行链发生静默漂移。
+OPERATION_NODE_SPECS: tuple[tuple[str, str, OperationNode], ...] = (
+    ("init_context", "初始化环境", init_context_node),
+    ("query_operation_data", "运营数据查询", query_operation_data_node),
+    ("detect_abnormal", "异常识别", detect_abnormal_node),
+    ("analyze_reason", "原因分析", analyze_reason_node),
+    ("generate_advice", "建议动作生成", generate_advice_node),
+    ("summary", "报告汇总", summary_node),
+)
+
+
 def build_operation_graph() -> StateGraph:
     """
     构建运营分析 Graph。
@@ -29,22 +46,14 @@ def build_operation_graph() -> StateGraph:
     """
     graph = StateGraph(OperationState)
 
-    # 注册 6 个节点（每个节点都是一个接收 state 并返回 state 的函数）
-    graph.add_node("init_context", init_context_node)
-    graph.add_node("query_operation_data", query_operation_data_node)
-    graph.add_node("detect_abnormal", detect_abnormal_node)
-    graph.add_node("analyze_reason", analyze_reason_node)
-    graph.add_node("generate_advice", generate_advice_node)
-    graph.add_node("summary", summary_node)
+    for node_key, _node_name, node_func in OPERATION_NODE_SPECS:
+        graph.add_node(node_key, node_func)
 
-    # 定义执行顺序（当前为线性流程，后续可按需增加条件分支）
-    graph.add_edge(START, "init_context")
-    graph.add_edge("init_context", "query_operation_data")
-    graph.add_edge("query_operation_data", "detect_abnormal")
-    graph.add_edge("detect_abnormal", "analyze_reason")
-    graph.add_edge("analyze_reason", "generate_advice")
-    graph.add_edge("generate_advice", "summary")
-    graph.add_edge("summary", END)
+    node_keys = [node_key for node_key, _node_name, _node_func in OPERATION_NODE_SPECS]
+    graph.add_edge(START, node_keys[0])
+    for current_node, next_node in pairwise(node_keys):
+        graph.add_edge(current_node, next_node)
+    graph.add_edge(node_keys[-1], END)
 
     return graph.compile()
 

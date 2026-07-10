@@ -1,6 +1,10 @@
+from typing import AsyncGenerator
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from starlette.responses import StreamingResponse
 
+from app.core.context.context_holder import get_request_context, get_user_context
 from app.core.schema.response_schema import ApiResponse
 from app.db.session import get_db
 from app.report_chat_agent.repositories import report_chat_repo
@@ -12,17 +16,48 @@ from app.report_chat_agent.schemas.response import (
     SendMessageResponse,
 )
 from app.report_chat_agent.service import create_chat_session, send_chat_message
+from app.report_chat_agent.stream_service import stream_chat_message
 
 router = APIRouter()
+
+
+@router.get(
+    "/reports/{report_id}/chat/session",
+    response_model=ApiResponse[CreateSessionResponse | None],
+)
+def get_recent_session(
+    report_id: int,
+    user_id: str = "anonymous",
+    db: Session = Depends(get_db),
+) -> ApiResponse[CreateSessionResponse | None]:
+    """只查询已有会话，避免用户仅打开报告时创建空会话。"""
+    resolved_user_id = _resolve_user_id(user_id)
+    session = report_chat_repo.get_recent_session(
+        db,
+        report_id=report_id,
+        user_id=resolved_user_id,
+    )
+    if session is None:
+        return ApiResponse(data=None)
+    report_chat_repo.ensure_conversation(db, session)
+    return ApiResponse(
+        data=CreateSessionResponse(
+            conversation_id=session.conversation_id,
+            session_id=session.id,
+            report_id=session.report_id,
+            title=session.title,
+        )
+    )
 
 
 @router.post("/reports/{report_id}/chat/sessions", response_model=ApiResponse[CreateSessionResponse])
 def create_session(report_id: int, payload: CreateSessionRequest) -> ApiResponse[CreateSessionResponse]:
     session = create_chat_session(
         report_id=report_id,
-        user_id=payload.user_id,
+        user_id=_resolve_user_id(payload.user_id),
     )
     data = CreateSessionResponse(
+        conversation_id=session["conversation_id"],
         session_id=session["session_id"],
         report_id=session["report_id"],
         title=session["title"],
@@ -42,6 +77,7 @@ def get_messages(
     messages = report_chat_repo.list_messages(db, session_id)
     msg_responses = [
         ChatMessageResponse(
+            runtime_session_id=m.runtime_session_id,
             role=m.role,
             content=m.content,
             evidence_refs=m.evidence_refs or [],
@@ -53,7 +89,11 @@ def get_messages(
         )
         for m in messages
     ]
-    data = GetMessagesResponse(session_id=session_id, messages=msg_responses)
+    data = GetMessagesResponse(
+        conversation_id=session.conversation_id,
+        session_id=session_id,
+        messages=msg_responses,
+    )
     return ApiResponse(data=data)
 
 
@@ -74,11 +114,14 @@ def send_message(
         report_id=payload.report_id,
         question=payload.question,
         user_id=session.user_id,
+        trace_id=get_request_context().trace_id,
     )
 
     data = SendMessageResponse(
         trace_id=result.get("trace_id", ""),
+        conversation_id=result.get("conversation_id", session.conversation_id),
         session_id=session_id,
+        runtime_session_id=result.get("runtime_session_id", ""),
         message_id=result.get("message_id", ""),
         question_scope=result.get("question_scope", "report_internal"),
         answer=result.get("final_answer", ""),
@@ -90,6 +133,43 @@ def send_message(
         rag_sources=result.get("rag_sources", []) or result.get("rag_results", []),
     )
     return ApiResponse(data=data)
+
+
+@router.post("/chat/sessions/{session_id}/messages/stream")
+async def send_message_stream(
+    session_id: str,
+    payload: SendMessageRequest,
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """基于当前报告生成真实 LLM chunk 流，并在完成后持久化整条消息。"""
+    session = report_chat_repo.get_session(db, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if session.report_id != payload.report_id:
+        raise HTTPException(status_code=400, detail="会话与报告不匹配")
+
+    trace_id = get_request_context().trace_id
+    session_user_id = session.user_id
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        async for event in stream_chat_message(
+            session_id=session_id,
+            report_id=payload.report_id,
+            question=payload.question,
+            user_id=session_user_id,
+            trace_id=trace_id,
+        ):
+            yield event
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 def _message_used_rag(message: object) -> bool:
@@ -122,3 +202,12 @@ def _message_rag_sources(message: object) -> list[dict]:
     if not isinstance(sources, list):
         return []
     return [source for source in sources if isinstance(source, dict)]
+
+
+def _resolve_user_id(requested_user_id: str) -> str:
+    """优先使用网关透传的真实用户身份，再回退到显式客户端身份。"""
+    context_user_id = get_user_context().user_id.strip()
+    if context_user_id and context_user_id != "anonymous":
+        return context_user_id
+    requested = requested_user_id.strip()
+    return requested or "anonymous"

@@ -5,8 +5,8 @@ from pydantic import BaseModel, Field
 
 from app.core.exception.error_code import NOT_FOUND
 from app.core.schema.response_schema import ApiResponse
-from app.tool_center.core.exceptions import ToolNotFoundError
-from app.tool_center.core.schemas import BaseToolInput, ToolContext
+from app.tool_center.exceptions import ToolNotFoundError
+from app.tool_center.contracts import BaseToolInput, ToolContext
 from app.tool_center.registry import get_tool, list_tools
 
 router = APIRouter(tags=["Tool Center"])

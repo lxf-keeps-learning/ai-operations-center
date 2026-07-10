@@ -1,3 +1,12 @@
+"""
+Conversation DTO — 会话的请求/响应数据结构
+
+ConversationCreate:  创建会话时的请求体
+ConversationUpdate:  更新会话的请求体（支持部分更新）
+ConversationStatusUpdate: 仅更新状态的请求体
+ConversationResponse: 会话的响应体（ORM 模型 → Pydantic）
+"""
+
 from datetime import datetime
 
 from pydantic import Field

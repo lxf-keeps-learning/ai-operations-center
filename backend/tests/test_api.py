@@ -176,6 +176,8 @@ def test_default_runtime_prompt_identifies_deepseek_not_openai() -> None:
     assert provider.model in prompt
     assert "不要自称 OpenAI" in prompt
     assert "GPT" in prompt
+    assert "已接入 LangGraph" in prompt
+    assert "START → init_session → load_prompt → call_llm → finalize → END" in prompt
 
 
 def test_runtime_chat_records_prompt_version_and_span_chain(
@@ -211,7 +213,7 @@ def test_runtime_chat_records_prompt_version_and_span_chain(
             system_prompt=prompt.content,
         )
 
-    monkeypatch.setattr("app.runtime.runtime_service.llm_client.chat", fake_chat)
+    monkeypatch.setattr("app.runtime.nodes.call_llm_node.llm_client.chat", fake_chat)
 
     result = runtime_service.chat(
         db=runtime_db_session,
@@ -236,7 +238,7 @@ def test_runtime_chat_records_prompt_version_and_span_chain(
 
     tool_span = next(span for span in spans if span.span_type == "tool")
     assert tool_span.output_data
-    assert tool_span.output_data["runtime_db_stores_ioc_master_data"] is False
+    assert tool_span.output_data["context_source"] == "mysql_session_json"
 
     session = session_service.get_by_id(runtime_db_session, result["session_id"])
     assert session is not None
@@ -244,6 +246,55 @@ def test_runtime_chat_records_prompt_version_and_span_chain(
     assert session.output_text == result["answer"]
     assert result["reply"] == result["answer"]
     assert trace_service.list_by_session_id(runtime_db_session, result["session_id"]) == spans
+
+
+def test_runtime_chat_falls_back_to_system_prompt_when_code_missing(
+    runtime_db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested_code = "missing_runtime_prompt"
+
+    def fake_chat(
+        prompt_content: str | None,
+        user_message: str,
+        history: list[dict[str, str]] | None = None,
+    ) -> LlmResult:
+        assert prompt_content is None
+        assert user_message == "使用兜底提示词回答"
+        assert history == []
+        return _fake_llm_result(
+            "已使用系统 Prompt 回答。",
+            system_prompt="内置 Runtime 系统 Prompt",
+        )
+
+    monkeypatch.setattr("app.runtime.nodes.call_llm_node.llm_client.chat", fake_chat)
+
+    result = runtime_service.chat(
+        db=runtime_db_session,
+        user_id="u_prompt_fallback",
+        message="使用兜底提示词回答",
+        prompt_code=requested_code,
+    )
+
+    session = session_service.get_by_id(runtime_db_session, result["session_id"])
+    spans = trace_service.list_by_trace_id(runtime_db_session, result["trace_id"])
+    prompt_span = next(span for span in spans if span.node_name == "load_active_prompt")
+    llm_span = next(span for span in spans if span.span_type == "llm")
+
+    assert session is not None
+    assert session.status == "success"
+    assert result["answer"] == "已使用系统 Prompt 回答。"
+    assert prompt_span.status == "success"
+    assert prompt_span.output_data == {
+        "prompt_found": False,
+        "fallback_to_system_prompt": True,
+        "requested_prompt_code": requested_code,
+    }
+    assert llm_span.prompt_id is None
+    assert llm_span.prompt_code == requested_code
+    assert llm_span.prompt_version is None
+    assert llm_span.prompt_snapshot == "内置 Runtime 系统 Prompt"
+    assert llm_span.input_data["fallback_to_system_prompt"] is True
 
 
 def test_runtime_chat_passes_conversation_history_to_llm(
@@ -266,7 +317,7 @@ def test_runtime_chat_passes_conversation_history_to_llm(
         )
         return _fake_llm_result(f"回答：{user_message}")
 
-    monkeypatch.setattr("app.runtime.runtime_service.llm_client.chat", fake_chat)
+    monkeypatch.setattr("app.runtime.nodes.call_llm_node.llm_client.chat", fake_chat)
 
     first = runtime_service.chat(
         db=runtime_db_session,

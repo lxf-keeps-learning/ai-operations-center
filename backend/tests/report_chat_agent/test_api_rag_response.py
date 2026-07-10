@@ -66,7 +66,9 @@ class TestSendMessageResponseSchema:
         """SendMessageResponse 包含 used_rag 和 rag_source_refs。"""
         resp = SendMessageResponse(
             trace_id="trace_001",
+            conversation_id="conv_001",
             session_id="session_001",
+            runtime_session_id="runtime_session_001",
             message_id="msg_001",
             question_scope="report_internal",
             answer="测试回答",
@@ -92,7 +94,9 @@ class TestSendMessageResponseSchema:
         """不传 RAG 字段时使用默认值。"""
         resp = SendMessageResponse(
             trace_id="trace_001",
+            conversation_id="conv_001",
             session_id="session_001",
+            runtime_session_id="runtime_session_001",
             message_id="msg_001",
             question_scope="report_internal",
             answer="测试回答",
@@ -107,7 +111,9 @@ class TestSendMessageResponseSchema:
         """有 RAG 无报告证据的场景。"""
         resp = SendMessageResponse(
             trace_id="trace_001",
+            conversation_id="conv_001",
             session_id="session_001",
+            runtime_session_id="runtime_session_001",
             message_id="msg_001",
             question_scope="report_internal",
             answer="知识库补充回答",
@@ -125,7 +131,9 @@ class TestSendMessageResponseSchema:
         """保留 Sprint5 原有字段。"""
         resp = SendMessageResponse(
             trace_id="trace_001",
+            conversation_id="conv_001",
             session_id="session_001",
+            runtime_session_id="runtime_session_001",
             message_id="msg_001",
             question_scope="report_internal",
             answer="测试回答",
@@ -213,3 +221,37 @@ async def test_report_chat_create_session_missing_report_is_not_500() -> None:
         assert response.status_code in (200, 404, 500)
         if response.status_code == 500:
             pytest.fail("创建会话时不应该返回 500")
+
+
+@pytest.mark.anyio
+async def test_report_chat_stream_endpoint_returns_sse(
+    report_chat_api_db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report_chat_repo.create_session(
+        report_chat_api_db,
+        report_id=1,
+        user_id="tester",
+        session_id="session_stream_api",
+    )
+
+    async def fake_stream(**kwargs):
+        assert kwargs["session_id"] == "session_stream_api"
+        yield 'event: message_started\ndata: {"event_type":"message_started"}\n\n'
+        yield 'event: answer_delta\ndata: {"event_type":"answer_delta","delta":"流式"}\n\n'
+        yield 'event: message_completed\ndata: {"event_type":"message_completed","answer":"流式"}\n\n'
+
+    monkeypatch.setattr(chat_api, "stream_chat_message", fake_stream)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/chat/sessions/session_stream_api/messages/stream",
+            headers={"X-Trace-Id": "trace_stream_api"},
+            json={"report_id": 1, "question": "为什么是高风险？"},
+        )
+
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers["content-type"]
+    assert response.headers["X-Trace-Id"] == "trace_stream_api"
+    assert "event: answer_delta" in response.text
+    assert '"delta":"流式"' in response.text

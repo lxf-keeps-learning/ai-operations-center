@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { marked } from 'marked'
 
 import { getDownloadUrl, getRecordDetail, listRecords, type AnalysisRecord, type AnalysisRecordDetail } from '@/api/records'
 import ReportChatPanel from '@/components/ReportChatPanel.vue'
+import { renderSafeMarkdown } from '@/utils/markdown'
 
 const domainTabs = [
   { key: '', label: '全部' },
@@ -48,7 +48,7 @@ function closeDetail() {
 
 function renderMd(text: string | null): string {
   if (!text) return ''
-  return marked.parse(text, { async: false }) as string
+  return renderSafeMarkdown(text)
 }
 
 const domainLabel: Record<string, string> = {

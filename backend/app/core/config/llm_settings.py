@@ -1,3 +1,12 @@
+"""
+大模型配置模块 — 多 Provider 管理与配置
+
+支持 Qwen / DeepSeek / Doubao 三种大模型 Provider。
+通过适配器模式统一管理 API Key、模型名、Base URL、Token 限制、RPM 限流等配置。
+敏感信息（API Key）通过环境变量注入，不硬编码。
+提供 list_public() 方法向前端暴露非敏感字段。
+"""
+
 import os
 from dataclasses import dataclass
 
@@ -28,6 +37,7 @@ class LLMProviderConfig:
     rpm_limit: int = 60
 
     def to_public(self) -> dict:
+        """返回非敏感配置（不含 api_key），供前端展示"""
         return {
             "provider": self.provider,
             "displayName": self.display_name,
@@ -47,6 +57,8 @@ _DOUBAO_API_KEY = os.environ.get("DOUBAO_API_KEY", _secrets.doubao_api_key)
 
 
 class LLMSettings:
+    """大模型配置管理器 — 管理所有 Provider 的配置并统一暴露访问接口"""
+
     def __init__(self) -> None:
         self._providers: dict[str, LLMProviderConfig] = {
             "qwen": LLMProviderConfig(
@@ -88,10 +100,12 @@ class LLMSettings:
         }
 
     def get_provider(self, provider: str) -> LLMProviderConfig | None:
+        """根据 provider 名称获取配置"""
         return self._providers.get(provider)
 
     @property
     def default_provider(self) -> str:
+        """获取默认启用的 provider 名称"""
         for name, cfg in self._providers.items():
             if cfg.default and cfg.enabled:
                 return name
@@ -99,12 +113,15 @@ class LLMSettings:
 
     @property
     def all_providers(self) -> list[LLMProviderConfig]:
+        """获取所有 provider 配置列表"""
         return list(self._providers.values())
 
     def list_public(self) -> list[dict]:
+        """返回所有已启用 provider 的非敏感配置，供 API 返回给前端"""
         return [p.to_public() for p in self._providers.values() if p.enabled]
 
     def get_api_key(self, provider: str) -> str:
+        """根据 provider 名称获取对应的 API Key（敏感信息，仅后端使用）"""
         cfg = self._providers.get(provider)
         if cfg:
             return cfg.api_key

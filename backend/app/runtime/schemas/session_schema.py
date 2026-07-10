@@ -1,3 +1,13 @@
+"""
+Session DTO — 运行记录的请求/响应数据结构
+
+SessionCreate:  创建运行记录（一次 AI 问答）的请求体
+SessionUpdate:  更新运行记录的请求体（支持部分更新）
+SessionStatusUpdate: 仅更新状态的请求体
+SessionOutputUpdate: 仅更新输出文本的请求体
+SessionResponse: 运行记录的响应体
+"""
+
 from datetime import datetime
 
 from pydantic import Field

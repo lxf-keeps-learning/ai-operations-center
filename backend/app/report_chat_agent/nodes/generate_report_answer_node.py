@@ -16,7 +16,9 @@ from pathlib import Path
 
 from app.config.settings import settings
 from app.report_chat_agent.state import ReportChatState
+from app.report_chat_agent.stream_context import get_answer_stream_callback
 from app.runtime.llm.client import LlmResult, llm_client
+from app.security.content_moderator import ModerationAction, content_moderator
 
 _PROMPT_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
@@ -88,11 +90,20 @@ def generate_report_answer_node(state: ReportChatState) -> ReportChatState:
     llm_usages: list[dict] = state.get("llm_usages", [])
 
     try:
-        result: LlmResult = llm_client.chat(
-            prompt_content=system,
-            user_message=prompt,
-            timeout_seconds=settings.operation_llm_timeout_seconds,
-        )
+        stream_callback = get_answer_stream_callback()
+        if stream_callback:
+            result = llm_client.stream_chat(
+                prompt_content=system,
+                user_message=prompt,
+                on_chunk=stream_callback,
+                timeout_seconds=settings.operation_llm_timeout_seconds,
+            )
+        else:
+            result = llm_client.chat(
+                prompt_content=system,
+                user_message=prompt,
+                timeout_seconds=settings.operation_llm_timeout_seconds,
+            )
         llm_usages.append({
             "action_type": "report_answer",
             "model_name": result.model,
@@ -132,6 +143,14 @@ def generate_report_answer_node(state: ReportChatState) -> ReportChatState:
     state["llm_usages"] = llm_usages
     state["errors"] = errors
     state["evidence_refs"] = evidence_refs
+
+    moderation = content_moderator.moderate_output(state.get("final_answer", ""))
+    if moderation.action == ModerationAction.MASK and moderation.masked_text:
+        state["final_answer"] = moderation.masked_text
+    elif moderation.action == ModerationAction.BLOCK:
+        state["final_answer"] = moderation.message or "AI 生成的回答已被安全策略过滤，请尝试重新提问。"
+        state["answer_type"] = "boundary"
+
     return state
 
 

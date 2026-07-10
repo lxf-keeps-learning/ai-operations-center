@@ -1,3 +1,20 @@
+"""
+统一响应模型 — 所有 API 接口必须返回此格式
+
+成功响应：
+  { code: 0, message: "success", traceId: "xxx", success: true, data: {...} }
+
+失败响应：
+  { code: 400001, message: "参数错误", traceId: "xxx", success: false, data: null }
+
+字段说明：
+  code      业务状态码（0 成功，非 0 失败）
+  message   响应信息
+  traceId   全链路追踪 ID
+  success   是否成功（由 code == 0 自动推导）
+  data      业务数据
+"""
+
 from typing import Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
@@ -26,10 +43,12 @@ class ApiResponse(BaseModel, Generic[T]):
     @computed_field
     @property
     def success(self) -> bool:
+        """是否成功（code == 0 即为成功）"""
         return self.code == 0
 
 
 def success_response(*, data: T | None = None, message: str = "success", trace_id: str | None = None) -> ApiResponse[T]:
+    """快速构造成功响应，自动注入 traceId"""
     return ApiResponse(
         code=0,
         message=message,
@@ -39,6 +58,7 @@ def success_response(*, data: T | None = None, message: str = "success", trace_i
 
 
 def error_response(*, code: int, message: str, trace_id: str | None = None) -> ApiResponse[None]:
+    """快速构造失败响应，自动注入 traceId"""
     return ApiResponse(
         code=code,
         message=message,

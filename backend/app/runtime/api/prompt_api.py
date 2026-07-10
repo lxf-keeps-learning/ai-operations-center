@@ -1,3 +1,10 @@
+"""
+Prompt 管理接口 — 提示词模板 CRUD
+
+Prompt 是 AI 对话的系统提示词模板，支持版本管理。
+提供创建、查询活跃版本、查询版本列表、更新状态等操作。
+"""
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -7,10 +14,8 @@ from app.runtime.services.prompt_service import prompt_service
 from app.core.schema.response_schema import ApiResponse
 from app.core.exception.base_exception import AppException
 from app.core.exception.error_code import NOT_FOUND
-from app.runtime.repositories.prompt_repository import PromptRepository
 
 router = APIRouter()
-_repo = PromptRepository()
 
 
 @router.post("/runtime/prompts", response_model=ApiResponse[PromptResponse], status_code=201)
@@ -35,8 +40,7 @@ def get_prompt_versions(code: str, db: Session = Depends(get_db)) -> ApiResponse
 
 @router.patch("/runtime/prompts/{prompt_id}/status", response_model=ApiResponse[PromptResponse])
 def update_prompt_status(prompt_id: str, payload: PromptStatusUpdate, db: Session = Depends(get_db)) -> ApiResponse[PromptResponse]:
-    result = _repo.update_status(db, prompt_id, payload.status)
+    result = prompt_service.update_status(db, prompt_id, payload.status)
     if result is None:
         raise AppException.from_error_code(NOT_FOUND)
-    response = PromptResponse.model_validate(result)
-    return ApiResponse(data=response)
+    return ApiResponse(data=result)

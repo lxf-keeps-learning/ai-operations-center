@@ -1,3 +1,10 @@
+"""
+AiPrompt — Prompt 模板模型
+
+存储 AI 对话的系统提示词模板。
+支持版本管理（code + version 联合唯一），可通过 status=active 获取当前生效版本。
+"""
+
 from datetime import datetime
 
 from sqlalchemy import DateTime, Integer, JSON, String, Text, UniqueConstraint

@@ -1,3 +1,13 @@
+"""
+运行时状态常量 — 定义所有实体允许的状态值
+
+Conversation: created / active / closed / archived
+Session:      created / running / success / failed / cancelled / expired
+Prompt:       draft / active / inactive / archived
+Trace:        success / failed / running
+Feedback:     inaccurate / incomplete / useful / unsafe / other
+"""
+
 # ── Conversation ──
 CONV_CREATED = "created"
 CONV_ACTIVE = "active"

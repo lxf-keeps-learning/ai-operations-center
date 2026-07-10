@@ -1,3 +1,11 @@
+"""
+配置展示接口 — 模型配置 / 运行环境
+
+提供两个接口供前端 Infra Console 页面使用：
+  GET /config/models    返回所有已启用 Provider 的非敏感配置（不含 API Key）
+  GET /config/runtime   返回当前环境、应用名、版本号、默认模型等运行时信息
+"""
+
 from fastapi import APIRouter
 
 from app.core.config.llm_settings import llm_settings

@@ -5,6 +5,7 @@ from app.report_chat_agent.state import ReportChatState
 
 def persist_chat_message_node(state: ReportChatState) -> ReportChatState:
     session_id = state.get("session_id", "")
+    runtime_session_id = state.get("runtime_session_id", "")
     trace_id = state.get("trace_id", "")
     report_id = state.get("report_id", "")
     user_id = state.get("user_id", "anonymous")
@@ -47,22 +48,24 @@ def persist_chat_message_node(state: ReportChatState) -> ReportChatState:
             )
             state["session_id"] = session.id
 
-        if user_question:
-            report_chat_repo.create_message(
+        # 正常 API 链路会在 Graph 执行前保存用户问题；保留该分支以兼容
+        # 直接调用 Graph 的测试和脚本，避免产生无统一 Session 的消息。
+        if not runtime_session_id and user_question:
+            runtime_session = report_chat_repo.begin_turn(
                 db,
-                session_id=session.id,
-                report_id=rid,
-                role="user",
-                content=user_question,
+                session=session,
+                question=user_question,
                 trace_id=trace_id,
             )
+            runtime_session_id = runtime_session.id
+            state["runtime_session_id"] = runtime_session_id
 
-        if final_answer:
-            assistant_message = report_chat_repo.create_message(
+        if final_answer and runtime_session_id:
+            assistant_message = report_chat_repo.complete_turn(
                 db,
                 session_id=session.id,
+                runtime_session_id=runtime_session_id,
                 report_id=rid,
-                role="assistant",
                 content=final_answer,
                 trace_id=trace_id,
                 question_scope=question_scope,

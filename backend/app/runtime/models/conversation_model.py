@@ -1,3 +1,10 @@
+"""
+AiConversation — 会话模型
+
+代表一次完整的对话过程，包含多个 Session（多次问答）。
+一个 Conversation 可以包含多条用户消息和 AI 回复记录。
+"""
+
 from datetime import datetime
 
 from sqlalchemy import DateTime, JSON, String, Text

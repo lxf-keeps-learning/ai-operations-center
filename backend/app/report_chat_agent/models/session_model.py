@@ -11,6 +11,7 @@ class ReportChatSession(Base):
     __tablename__ = "report_chat_session"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     report_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False, default="本质安全报告追问")

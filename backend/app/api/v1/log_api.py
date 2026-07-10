@@ -1,3 +1,15 @@
+"""
+日志查询接口 — 最近日志 / LLM 使用日志
+
+提供两个接口供前端日志中心页面展示：
+  GET /logs/recent      最近系统日志（当前使用 Mock 数据）
+  GET /logs/llm-usage   最近 LLM 调用记录（Mock 数据，含 provider / model / tokens / success）
+
+现状：
+  Sprint1 阶段使用内存 Mock 数据演示日志中心功能，
+  后续接入真实日志存储后替换为数据库查询。
+"""
+
 from datetime import UTC, datetime
 from typing import Any
 
@@ -7,6 +19,7 @@ from app.core.schema.response_schema import ApiResponse
 
 router = APIRouter()
 
+# Sprint1: 使用 Mock 数据演示日志中心，后续替换为真实数据库查询
 _MOCK_RECENT_LOGS: list[dict[str, Any]] = [
     {
         "traceId": "trace_20260703_aaa",

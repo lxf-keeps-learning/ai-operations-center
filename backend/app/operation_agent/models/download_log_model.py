@@ -1,3 +1,10 @@
+"""
+OperationDownloadLog — 报告下载日志模型
+
+记录用户下载报告的每次操作，包含下载者信息、IP、User-Agent、状态等。
+用于统计报告下载次数和审计追踪。
+"""
+
 from datetime import datetime
 
 from sqlalchemy import DateTime, Text, BigInteger, String, Integer

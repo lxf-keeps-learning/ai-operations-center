@@ -1,3 +1,10 @@
+"""
+Trace DTO — 全链路追踪的请求/响应数据结构
+
+TraceCreate:   创建 Span 时的请求体（包含 traceId、spanId、父 Span、各环节信息）
+TraceResponse: Trace 的响应体
+"""
+
 from datetime import datetime
 
 from pydantic import Field

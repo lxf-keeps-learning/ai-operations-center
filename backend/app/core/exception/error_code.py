@@ -1,3 +1,24 @@
+"""
+错误码定义模块 — 统一管理所有业务错误码
+
+设计原则：
+  - HTTP 状态码表示协议层状态（200/400/500）
+  - 业务错误码表示业务层具体错误（400001/500101/504101）
+  - 二者分层，不混用
+
+错误码分段规则：
+  0       成功
+  400xxx  客户端参数错误
+  401xxx  认证错误
+  403xxx  权限错误
+  404xxx  资源不存在
+  422xxx  校验错误
+  429xxx  限流
+  500xxx  系统内部错误
+  50xxxx  AI 模型相关错误
+  503xxx  依赖服务不可用
+"""
+
 from dataclasses import dataclass
 from typing import Self
 
@@ -33,6 +54,8 @@ TRACE_NOT_FOUND = ErrorCode(code=404003, message="Trace 不存在", http_status=
 PROMPT_NOT_FOUND = ErrorCode(code=404004, message="Prompt 不存在", http_status=404, description="prompt_code 无效")
 ITEM_NOT_FOUND = ErrorCode(code=404005, message="Item 不存在", http_status=404, description="item_id 无效")
 SSE_STREAM_NOT_FOUND = ErrorCode(code=404006, message="SSE 流不存在", http_status=404, description="traceId 找不到对应流")
+CONVERSATION_NOT_FOUND = ErrorCode(code=404007, message="会话不存在", http_status=404, description="conversation_id 无效")
+CONVERSATION_CLOSED = ErrorCode(code=400004, message="会话已关闭，无法继续对话", http_status=400, description="conversation 状态不允许新的对话")
 DATA_WRITE_ERROR = ErrorCode(code=500002, message="数据写入失败", http_status=500, description="写入业务数据或日志失败")
 DATA_QUERY_ERROR = ErrorCode(code=500003, message="数据查询失败", http_status=500, description="查询数据库失败")
 LLM_CONFIG_MISSING = ErrorCode(code=500004, message="LLM 配置缺失", http_status=500, description="LLM Key、Base URL、模型名缺失")
@@ -58,6 +81,8 @@ ALL_CODES: list[ErrorCode] = [
     PROMPT_NOT_FOUND,
     ITEM_NOT_FOUND,
     SSE_STREAM_NOT_FOUND,
+    CONVERSATION_NOT_FOUND,
+    CONVERSATION_CLOSED,
     DATA_WRITE_ERROR,
     DATA_QUERY_ERROR,
     LLM_CONFIG_MISSING,
@@ -70,10 +95,12 @@ _CODE_MAP: dict[int, ErrorCode] = {ec.code: ec for ec in ALL_CODES}
 
 
 def get_by_code(code: int) -> ErrorCode | None:
+    """根据业务错误码数字查找对应的 ErrorCode 对象"""
     return _CODE_MAP.get(code)
 
 
 def get_http_status(code: int) -> int:
+    """根据业务错误码获取对应的 HTTP 状态码，未匹配时默认返回 500"""
     ec = _CODE_MAP.get(code)
     if ec is not None:
         return ec.http_status

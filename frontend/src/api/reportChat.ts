@@ -7,6 +7,7 @@ export type ReportQuestionScope =
   | 'out_of_scope'
 
 export interface ReportChatSession {
+  conversation_id: string
   session_id: string
   report_id: number
   title: string
@@ -21,6 +22,7 @@ export interface RagSource {
 }
 
 export interface ReportChatMessage {
+  runtime_session_id?: string | null
   role: 'user' | 'assistant'
   content: string
   evidence_refs: string[]
@@ -32,13 +34,16 @@ export interface ReportChatMessage {
 }
 
 export interface ReportChatMessagesResponse {
+  conversation_id: string
   session_id: string
   messages: ReportChatMessage[]
 }
 
 export interface SendReportChatMessageResponse {
   trace_id: string
+  conversation_id: string
   session_id: string
+  runtime_session_id: string
   message_id: string
   question_scope: ReportQuestionScope
   answer: string
@@ -55,6 +60,11 @@ export async function createReportChatSession(reportId: number, userId = 'anonym
     method: 'POST',
     body: JSON.stringify({ user_id: userId }),
   })
+}
+
+export async function getRecentReportChatSession(reportId: number, userId = 'anonymous') {
+  const query = new URLSearchParams({ user_id: userId })
+  return request<ReportChatSession | null>(`/reports/${reportId}/chat/session?${query.toString()}`)
 }
 
 export async function getReportChatMessages(sessionId: string) {

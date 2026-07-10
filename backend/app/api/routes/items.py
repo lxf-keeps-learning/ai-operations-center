@@ -1,3 +1,16 @@
+"""
+Demo CRUD 接口 — 演示前后端 + 数据库完整读写能力
+
+提供 system_items 表的增删改查接口：
+  POST   /items        创建 Item
+  GET    /items        查询列表（分页、按 is_active 过滤）
+  GET    /items/{id}   查询详情
+  PUT    /items/{id}   更新 Item
+  DELETE /items/{id}   删除 Item
+
+Sprint0 阶段用于验证 前端 → 后端 → MySQL 主链路是否跑通。
+"""
+
 from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session

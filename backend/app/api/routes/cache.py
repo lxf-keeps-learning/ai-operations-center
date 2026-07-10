@@ -1,3 +1,14 @@
+"""
+Redis 健康检查接口 — GET /cache/ping
+
+提供 Redis 连接状态检测：
+  - REDIS_ENABLED=false 时返回 disabled 状态，不报错
+  - REDIS_ENABLED=true 时尝试连接 Redis 并返回 pong
+  - 连接失败时返回清晰错误信息，不影响其他接口
+
+Sprint0 阶段 Redis 作为预留组件，不阻塞主流程。
+"""
+
 from fastapi import APIRouter
 
 from app.config.settings import settings

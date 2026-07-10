@@ -1,3 +1,10 @@
+"""
+OperationReportFile — 运营分析报告文件模型
+
+记录已导出的报告文件信息（Markdown/PDF 等格式）。
+支持本地存储和对象存储两种方式，包含文件路径、大小、哈希、下载次数等。
+"""
+
 from datetime import datetime
 
 from sqlalchemy import DateTime, Text, BigInteger, String, Integer, SmallInteger

@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { marked } from 'marked'
 
-import type { OperationAnalyzeParams } from '@/api/operation'
+import type { OperationAnalyzeParams, OperationResult } from '@/api/operation'
 import { getRecordDetail, getDownloadUrl, listRecords, type AnalysisRecord, type AnalysisRecordDetail } from '@/api/records'
 import { buildRequestKey, useOperationStore } from '@/stores/operation'
 import ReportChatPanel from '@/components/ReportChatPanel.vue'
+import { useAnalysisProgressStore } from '@/stores/analysisProgressStore'
+import { renderSafeMarkdown } from '@/utils/markdown'
 
 const store = useOperationStore()
+const progressStore = useAnalysisProgressStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -52,20 +54,23 @@ const loadingDetail = ref(false)
 const userSelected = ref(false)
 const error = ref('')
 const now = ref(Date.now())
+const activeAnalysisParams = ref<OperationAnalyzeParams | null>(null)
+const activeAnalysisKey = ref('')
 let countdownTimer: ReturnType<typeof setInterval> | null = null
 
 onMounted(() => {
   countdownTimer = setInterval(() => { now.value = Date.now() }, 10_000)
   void fetchRecords().then(() => {
-    const first = domainRecords.value[0]
-    if (first) {
-      void selectRecord(first.id, false)
+    const match = cooldownRecord.value
+    if (match) {
+      void selectRecord(match.id, false)
     }
   })
 })
 
 onUnmounted(() => {
   if (countdownTimer !== null) clearInterval(countdownTimer)
+  progressStore.cancelStream()
 })
 
 const queryDomain = computed(() => normalizeDomain(queryValue('domain') || queryValue('panel') || 'safety'))
@@ -106,24 +111,16 @@ const displayParams = computed(() => {
 const pageTitle = computed(() => `${activeDomain.value} — AI 运营分析诊断`)
 
 function renderMarkdown(text: string): string {
-  return marked.parse(normalizeReportMarkdown(text), { async: false, gfm: true }) as string
-}
-
-function normalizeReportMarkdown(text: string): string {
-  return text
-    .replace(/\r\n/g, '\n')
-    .replace(/^##\s*运营分析(?:报告|结论)\s*\n+/u, '')
-    .replace(/</g, '&lt;')
+  return renderSafeMarkdown(text, { stripOperationHeading: true })
 }
 
 function startAnalysis(forceRefresh = true) {
-  void store.analyze(
-    {
-      ...analysisParams.value,
-      force_refresh: forceRefresh,
-    },
-    analysisKey.value,
-  )
+  const params = { ...analysisParams.value, force_refresh: forceRefresh }
+  activeAnalysisParams.value = params
+  activeAnalysisKey.value = buildRequestKey(params)
+  selectedRecord.value = null
+  userSelected.value = false
+  progressStore.startStreamAnalysis(params)
 }
 
 function downloadReport() {
@@ -162,6 +159,9 @@ async function fetchRecords() {
 }
 
 async function selectRecord(id: number, markUserSelected = true) {
+  if (progressStore.loading) {
+    progressStore.cancelStream()
+  }
   userSelected.value = markUserSelected
   loadingDetail.value = true
   error.value = ''
@@ -184,7 +184,8 @@ function normalizeDomain(value: string): string {
 }
 
 function normalizeTimeDimension(value: string): string {
-  return timeDimensionApiMap[value] || value
+  const normalized = timeDimensionApiMap[value] || value
+  return normalized in timeDimensionLabelMap ? normalized : 'month'
 }
 
 function timeDimensionLabel(value: string): string {
@@ -249,14 +250,21 @@ const cooldownRemaining = computed(() => {
 })
 
 const canGenerate = computed(() => {
-  if (store.loading) return false
+  if (store.loading || progressStore.loading) return false
   return !isGenerating.value
 })
 
-const isGenerating = computed(() => store.loading && store.currentKey === analysisKey.value)
+const isGenerating = computed(() => {
+  return (
+    (progressStore.loading && progressStore.status === 'running')
+    || (store.loading && store.currentKey === analysisKey.value)
+  )
+})
+
+const pageError = computed(() => error.value || progressStore.error || store.error)
 
 const cooldownHint = computed(() => {
-  if (store.loading) return ''
+  if (store.loading || progressStore.loading) return ''
   const remain = cooldownRemaining.value
   const record = currentRecord.value
   const time = record?.created_at
@@ -304,6 +312,27 @@ watch(
   },
 )
 
+watch(
+  () => progressStore.report,
+  (payload) => {
+    if (!payload || !activeAnalysisParams.value) return
+    store.applyStreamResult(
+      normalizeStreamResult(payload),
+      activeAnalysisParams.value,
+      activeAnalysisKey.value || buildRequestKey(activeAnalysisParams.value),
+    )
+  },
+)
+
+watch(
+  () => progressStore.error,
+  (message) => {
+    if (message) {
+      store.applyStreamError(message)
+    }
+  },
+)
+
 
 
 function recordMatchesCurrentParams(record: AnalysisRecord): boolean {
@@ -314,6 +343,28 @@ function recordMatchesCurrentParams(record: AnalysisRecord): boolean {
     ? record.page_context.active_tab
     : ''
   return (recordActiveTab || '') === (activeTab.value || '')
+}
+
+function normalizeStreamResult(payload: Record<string, unknown>): OperationResult {
+  return {
+    record_id: typeof payload.record_id === 'number' ? payload.record_id : null,
+    trace_id: typeof payload.trace_id === 'string' ? payload.trace_id : '',
+    status: typeof payload.status === 'string' ? payload.status : 'success',
+    summary: typeof payload.summary === 'string' ? payload.summary : '',
+    abnormal_items: toRecordList(payload.abnormal_items),
+    risk_items: toRecordList(payload.risk_items),
+    advice_items: toRecordList(payload.advice_items),
+    evidence: toRecordList(payload.evidence),
+    errors: toRecordList(payload.errors),
+  }
+}
+
+function toRecordList(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter(isRecord) : []
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 </script>
 
@@ -337,22 +388,8 @@ function recordMatchesCurrentParams(record: AnalysisRecord): boolean {
       </button>
     </div>
 
-    <div class="analyze-bar" style="display: none">
-      <div class="analyze-bar__params">
-        <span v-for="item in displayParams" :key="item" class="param-tag">{{ item }}</span>
-      </div>
-      <button
-        class="btn-analyze"
-        :disabled="!canGenerate"
-        :title="cooldownHint"
-        @click="startAnalysis(true)"
-      >
-        {{ generateButtonText }}
-      </button>
-      <span v-if="cooldownHint" class="analyze-bar__hint">{{ cooldownHint }}</span>
-    </div>
 
-    <p v-if="error" class="page-error">{{ error }}</p>
+    <p v-if="pageError" class="page-error">{{ pageError }}</p>
 
     <div class="report-analysis-workspace">
       <aside class="record-list" aria-label="分析报告列表">
@@ -384,28 +421,34 @@ function recordMatchesCurrentParams(record: AnalysisRecord): boolean {
       </aside>
 
       <section class="report-preview">
-        <template v-if="store.loading">
+        <template v-if="progressStore.loading || store.loading || progressStore.status === 'failed'">
           <div class="operation-progress">
             <div class="progress-card">
-              <h3>分析进行中 — {{ activeDomain }}</h3>
+              <h3>{{ progressStore.status === 'failed' ? '分析失败' : '分析进行中' }} — {{ activeDomain }}</h3>
+              <div v-if="progressStore.error" class="progress-error">{{ progressStore.error }}</div>
               <div class="step-list">
                 <div
-                  v-for="(step, i) in store.steps"
-                  :key="i"
+                  v-for="step in progressStore.steps"
+                  :key="step.key"
                   class="step-item"
                   :class="{
-                    'step-item--past': i < store.currentStep,
-                    'step-item--current': i === store.currentStep,
-                    'step-item--future': i > store.currentStep,
+                    'step-item--past': step.status === 'completed',
+                    'step-item--current': step.status === 'running',
+                    'step-item--future': step.status === 'pending',
+                    'step-item--failed': step.status === 'failed',
                   }"
                 >
                   <span class="step-icon">
-                    <span v-if="i < store.currentStep" class="step-dot step-dot--done">✓</span>
-                    <span v-else-if="i === store.currentStep" class="step-dot step-dot--active" />
+                    <span v-if="step.status === 'completed'" class="step-dot step-dot--done">✓</span>
+                    <span v-else-if="step.status === 'running'" class="step-dot step-dot--active" />
+                    <span v-else-if="step.status === 'failed'" class="step-dot step-dot--failed">✗</span>
                     <span v-else class="step-dot step-dot--pending" />
                   </span>
-                  <span class="step-label" :class="{ 'step-label--active': i === store.currentStep }">
-                    {{ step }}
+                  <span class="step-label" :class="{ 'step-label--active': step.status === 'running', 'step-label--failed': step.status === 'failed' }">
+                    {{ step.title }}
+                    <span v-if="step.status === 'completed' && step.durationMs !== null" class="step-duration">{{ step.durationMs }}ms</span>
+                    <span v-if="step.status === 'completed' && step.sourceLabel" class="step-source">· {{ step.sourceLabel }}</span>
+                    <span v-if="step.status === 'failed' && step.errorMessage" class="step-error-msg">{{ step.errorMessage }}</span>
                   </span>
                 </div>
               </div>
@@ -899,6 +942,59 @@ function recordMatchesCurrentParams(record: AnalysisRecord): boolean {
 
 .step-item--past .step-label {
   color: #166534;
+}
+
+.step-item--failed .step-label {
+  color: #dc2626;
+}
+
+.step-label--failed {
+  color: #dc2626;
+  font-weight: 700;
+}
+
+.step-dot--failed {
+  align-items: center;
+  background: #dc2626;
+  color: #ffffff;
+  display: flex;
+  font-size: 11px;
+  font-weight: 800;
+  height: 20px;
+  justify-content: center;
+  width: 20px;
+}
+
+.step-duration {
+  color: #6366f1;
+  font-size: 12px;
+  font-weight: 700;
+  margin-left: 6px;
+}
+
+.step-source {
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 400;
+  margin-left: 2px;
+}
+
+.step-error-msg {
+  color: #dc2626;
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  margin-top: 2px;
+}
+
+.progress-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  color: #dc2626;
+  font-size: 13px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
 }
 
 .markdown-content {

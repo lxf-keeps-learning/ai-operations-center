@@ -6,6 +6,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.config.settings import settings
 from app.main import app
+from app.operation_agent import api as operation_api
 from app.operation_agent.api import records_api
 from app.operation_agent.graph import operation_graph
 from app.operation_agent.services.record_service import build_cache_key
@@ -176,15 +177,18 @@ class TestOperationGraph:
 async def test_operation_analyze_api_returns_closed_loop_payload(
     fake_operation_llm: None,
 ) -> None:
+    trace_id = "trace_operation_contract_001"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post(
             "/api/v1/operation/analyze",
+            headers={"X-Trace-Id": trace_id},
             json={
                 "trigger_type": "tab_analysis",
                 "domain": "safety",
                 "active_tab": "本质安全",
                 "time_dimension": "month",
                 "date": "2026-07",
+                "force_refresh": True,
             },
         )
 
@@ -193,12 +197,58 @@ async def test_operation_analyze_api_returns_closed_loop_payload(
 
     assert response.status_code == 200
     assert payload["success"] is True
-    assert data["trace_id"].startswith("trace_")
+    assert response.headers["X-Trace-Id"] == trace_id
+    assert data["trace_id"] == trace_id
     assert data["summary"].startswith("## 运营分析报告")
     assert data["abnormal_items"]
     assert data["risk_items"]
     assert data["advice_items"]
     assert data["evidence"]
+
+
+@pytest.mark.anyio
+async def test_operation_api_passes_request_user_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_analyze_operation(request, user_context=None, trace_id=None):
+        captured["user_context"] = user_context
+        captured["trace_id"] = trace_id
+        return {
+            "trace_id": trace_id,
+            "final_answer": "## 运营分析报告",
+            "abnormal_items": [],
+            "risk_items": [],
+            "advice_items": [],
+            "evidence": [],
+            "errors": [],
+        }
+
+    monkeypatch.setattr(operation_api, "analyze_operation", fake_analyze_operation)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/operation/analyze",
+            headers={
+                "X-Trace-Id": "trace_user_context_001",
+                "X-User-Id": "user_001",
+                "X-Username": "operation-owner",
+                "X-Org-Id": "tenant_001",
+                "X-Roles": "operator,auditor",
+            },
+            json={"domain": "safety", "force_refresh": True},
+        )
+
+    assert response.status_code == 200
+    assert captured["trace_id"] == "trace_user_context_001"
+    assert captured["user_context"] == {
+        "user_id": "user_001",
+        "user_name": "operation-owner",
+        "tenant_id": "tenant_001",
+        "roles": ["operator", "auditor"],
+        "permissions": [],
+    }
 
 
 def test_operation_report_normalizes_llm_report_shell(monkeypatch: pytest.MonkeyPatch) -> None:

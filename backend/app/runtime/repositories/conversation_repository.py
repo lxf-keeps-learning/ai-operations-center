@@ -1,3 +1,5 @@
+"""ConversationRepository — 会话数据访问层"""
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 

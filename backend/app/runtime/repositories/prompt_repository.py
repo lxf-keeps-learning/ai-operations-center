@@ -1,3 +1,5 @@
+"""PromptRepository — Prompt 模板数据访问层"""
+
 from datetime import datetime
 
 from sqlalchemy import select
@@ -54,6 +56,7 @@ class PromptRepository:
         return record
 
     def get_active_by_code(self, db: Session, code: str) -> AiPrompt | None:
+        """获取指定 code 下当前激活的最新版本 Prompt"""
         stmt = (
             select(AiPrompt)
             .where(AiPrompt.code == code, AiPrompt.status == "active")
@@ -63,6 +66,7 @@ class PromptRepository:
         return db.scalar(stmt)
 
     def get_versions_by_code(self, db: Session, code: str) -> list[AiPrompt]:
+        """获取指定 code 的所有版本，按版本号降序"""
         stmt = (
             select(AiPrompt)
             .where(AiPrompt.code == code)
@@ -71,6 +75,7 @@ class PromptRepository:
         return list(db.scalars(stmt).all())
 
     def _max_version_by_code(self, db: Session, code: str) -> int:
+        """获取指定 code 的最大版本号，用于新版本自增"""
         stmt = select(AiPrompt.version).where(AiPrompt.code == code).order_by(AiPrompt.version.desc()).limit(1)
         result = db.scalar(stmt)
         return result if result is not None else 0

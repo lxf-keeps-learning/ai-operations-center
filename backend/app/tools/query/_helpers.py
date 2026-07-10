@@ -1,7 +1,7 @@
 from typing import Any
 
 from app.integrations.ioc.schema import IocApiResponse
-from app.tool_center.core.exceptions import ToolException
+from app.tool_center.exceptions import ToolException
 
 
 def ensure_success(resp: IocApiResponse, code: str, message: str) -> None:

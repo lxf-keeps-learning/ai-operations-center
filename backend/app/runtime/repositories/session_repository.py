@@ -1,3 +1,5 @@
+"""SessionRepository — 运行记录数据访问层"""
+
 from datetime import datetime
 
 from sqlalchemy import select
@@ -35,6 +37,7 @@ class SessionRepository:
         conversation_id: str,
         limit: int = 6,
     ) -> list[AiSession]:
+        """查询最近 N 条成功的对话记录，按时间正序返回"""
         stmt = (
             select(AiSession)
             .where(
@@ -46,7 +49,7 @@ class SessionRepository:
             .limit(limit)
         )
         records = list(db.scalars(stmt).all())
-        return list(reversed(records))
+        return list(reversed(records))  # 正序返回给 LLM 上下文
 
     def update(self, db: Session, session_id: str, payload: SessionUpdate) -> AiSession | None:
         record = self.get_by_id(db, session_id)
