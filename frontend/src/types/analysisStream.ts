@@ -4,6 +4,7 @@ export type AnalysisEventType =
   | 'node_completed'
   | 'node_failed'
   | 'report_completed'
+  | 'report_delta'
   | 'analysis_failed'
   | 'cancelled'
   | 'heartbeat'

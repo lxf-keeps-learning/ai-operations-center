@@ -11,6 +11,7 @@ from app.analysis_stream.event_types import (
     EVENT_NODE_FAILED,
     EVENT_NODE_STARTED,
     EVENT_REPORT_COMPLETED,
+    EVENT_REPORT_DELTA,
     EVENT_STREAM_CLOSED,
     STATUS_COMPLETED,
     STATUS_FAILED,
@@ -103,6 +104,19 @@ class SseEventEmitter:
             sequence=self._next_sequence(),
             duration_ms=duration_ms,
             payload=payload,
+        )
+
+    def create_report_delta(self, delta: str) -> AnalysisStreamEvent:
+        """报告汇总节点产生的 Markdown 增量。"""
+        return build_event(
+            run_id=self._run_id,
+            event_type=EVENT_REPORT_DELTA,
+            status=STATUS_RUNNING,
+            message="报告内容生成中",
+            sequence=self._next_sequence(),
+            node_key="summary",
+            node_name="报告汇总",
+            payload={"delta": delta},
         )
 
     def emit_report_completed(

@@ -295,6 +295,8 @@ onMounted(() => {
               time_dimension: timeDimension,
               date: currentDate,
               category: currentCategory,
+              generate: '1',
+              source: 'overview_ai',
             },
           }"
         >
@@ -444,6 +446,8 @@ onMounted(() => {
               tab: activeRightTab,
               time_dimension: timeDimension,
               date: currentDate,
+              generate: '1',
+              source: 'overview_ai',
             },
           }"
         >

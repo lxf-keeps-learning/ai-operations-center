@@ -81,13 +81,7 @@ class TestGenerateAnswerWithRag:
 
     def test_uses_report_answer_when_no_rag(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """used_rag=False → 使用 report_answer.md 模板。"""
-        monkeypatch.setattr(
-            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.chat",
-            lambda **kwargs: _fake_llm_result("仅基于报告的回答"),
-        )
-
         state = _base_state(used_rag=False)
-        # 捕获传入 llm_client.chat 的 user_message 来验证模板选择。
         captured: dict[str, Any] = {}
 
         def capturing_chat(**kwargs: Any) -> LlmResult:
@@ -103,9 +97,7 @@ class TestGenerateAnswerWithRag:
         user_msg = captured.get("user_message", "")
         assert result["answer_type"] == "normal"
         assert result["final_answer"] == "仅基于报告的回答"
-        # 应使用 report_answer.md（其中包含"检索到的报告片段"字段）。
         assert "检索到的报告片段" in user_msg
-        # 不应包含 RAG 相关字段。
         assert "RAG 检索结果" not in user_msg
 
     def test_uses_rag_answer_when_rag_enabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -135,7 +127,6 @@ class TestGenerateAnswerWithRag:
         user_msg = captured.get("user_message", "")
         assert result["answer_type"] == "normal"
         assert result["final_answer"] == "基于报告和知识库的回答"
-        # 应使用 rag_answer.md（包含"合并上下文"和"RAG 检索结果"字段）。
         assert "合并上下文" in user_msg or "RAG 检索结果" in user_msg
 
     def test_rag_empty_falls_back_to_report(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -156,7 +147,6 @@ class TestGenerateAnswerWithRag:
 
         user_msg = captured.get("user_message", "")
         assert result["answer_type"] == "normal"
-        # rag_results 为空，退化为 report_answer.md。
         assert "检索到的报告片段" in user_msg
 
     def test_llm_failure_fallback_includes_rag(self, monkeypatch: pytest.MonkeyPatch) -> None:

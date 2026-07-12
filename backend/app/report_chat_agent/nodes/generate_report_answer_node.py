@@ -14,13 +14,22 @@
 import json
 from pathlib import Path
 
+from langgraph.config import get_stream_writer
+
 from app.config.settings import settings
 from app.report_chat_agent.state import ReportChatState
-from app.report_chat_agent.stream_context import get_answer_stream_callback
 from app.runtime.llm.client import LlmResult, llm_client
 from app.security.content_moderator import ModerationAction, content_moderator
 
 _PROMPT_DIR = Path(__file__).resolve().parent.parent / "prompts"
+
+
+def _stream_writer_or_none():
+    """取得 LangGraph writer；节点被独立调用时返回 None。"""
+    try:
+        return get_stream_writer()
+    except RuntimeError:
+        return None
 
 
 def _load_prompt(name: str) -> str:
@@ -90,12 +99,20 @@ def generate_report_answer_node(state: ReportChatState) -> ReportChatState:
     llm_usages: list[dict] = state.get("llm_usages", [])
 
     try:
-        stream_callback = get_answer_stream_callback()
-        if stream_callback:
+        # astream 模式下用 get_stream_writer() 实时回传 token
+        # invoke 模式下直接调用 chat()
+        writer = _stream_writer_or_none() if state.get("_streaming") else None
+
+        if writer is not None:
+            def on_chunk(text: str) -> None:
+                writer({
+                    "kind": "llm_token",
+                    "token": text,
+                })
             result = llm_client.stream_chat(
                 prompt_content=system,
                 user_message=prompt,
-                on_chunk=stream_callback,
+                on_chunk=on_chunk,
                 timeout_seconds=settings.operation_llm_timeout_seconds,
             )
         else:

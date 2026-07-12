@@ -57,6 +57,7 @@ def save_analysis_result(
     risk = result.get("risk_items", [])
     advice = result.get("advice_items", [])
     evidence = result.get("evidence", [])
+    analysis_basis = result.get("analysis_basis", {})
     final_answer = result.get("final_answer", "")
     metrics = result.get("metrics", [])
     llm_usages: list[dict] = result.get("llm_usages", [])
@@ -94,7 +95,7 @@ def save_analysis_result(
         abnormal_items_json={"items": abnormal},
         risk_items_json={"items": risk},
         advice_items_json={"items": advice},
-        evidence_json={"items": evidence},
+        evidence_json={"items": evidence, "analysis_basis": analysis_basis},
         final_answer_markdown=final_answer,
         summary_text=summary,
         status=status,

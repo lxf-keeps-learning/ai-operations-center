@@ -1,4 +1,5 @@
 import { request } from '@/utils/request'
+import type { AnalysisBasis } from '@/api/operation'
 
 export interface AnalysisRecord {
   id: number
@@ -20,6 +21,7 @@ export interface AnalysisRecordDetail extends AnalysisRecord {
   error_message: string | null
   abnormal_items: Record<string, unknown> | null
   risk_items: Record<string, unknown> | null
+  analysis_basis: AnalysisBasis | null
   model_name: string | null
   input_tokens: number
   output_tokens: number

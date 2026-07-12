@@ -34,8 +34,10 @@ export const useAnalysisProgressStore = defineStore('analysisProgress', () => {
   const steps = ref<AnalysisStep[]>(JSON.parse(JSON.stringify(INITIAL_STEPS)))
   const currentNodeKey = ref('')
   const report = ref<Record<string, unknown> | null>(null)
+  const streamedReport = ref('')
   const error = ref('')
   const loading = ref(false)
+  const lastSequence = ref(0)
 
   let streamController: { abort: () => void } | null = null
 
@@ -45,6 +47,12 @@ export const useAnalysisProgressStore = defineStore('analysisProgress', () => {
   })
 
   function handleStreamEvent(event: AnalysisStreamEvent) {
+    // SSE 重连或服务端事件回放可能带来重复/乱序数据。sequence 是同一
+    // run 内的单调序号，旧事件不能覆盖已经展示的新状态。
+    if (event.run_id === runId.value && event.sequence <= lastSequence.value) return
+    if (runId.value && event.run_id !== runId.value && event.event_type !== 'analysis_started') return
+    lastSequence.value = event.sequence
+
     switch (event.event_type) {
       case 'analysis_started':
         status.value = 'running'
@@ -84,8 +92,17 @@ export const useAnalysisProgressStore = defineStore('analysisProgress', () => {
       case 'report_completed':
         status.value = 'completed'
         report.value = event.payload || null
+        if (typeof event.payload?.summary === 'string') {
+          streamedReport.value = event.payload.summary
+        }
         loading.value = false
         break
+
+      case 'report_delta': {
+        const delta = event.payload?.delta
+        if (typeof delta === 'string') streamedReport.value += delta
+        break
+      }
 
       case 'analysis_failed':
         status.value = 'failed'
@@ -160,8 +177,10 @@ export const useAnalysisProgressStore = defineStore('analysisProgress', () => {
     steps.value = JSON.parse(JSON.stringify(INITIAL_STEPS))
     currentNodeKey.value = ''
     report.value = null
+    streamedReport.value = ''
     error.value = ''
     loading.value = false
+    lastSequence.value = 0
   }
 
   return {
@@ -170,8 +189,10 @@ export const useAnalysisProgressStore = defineStore('analysisProgress', () => {
     steps,
     currentNodeKey,
     report,
+    streamedReport,
     error,
     loading,
+    lastSequence,
     currentStepIndex,
     handleStreamEvent,
     startStreamAnalysis,

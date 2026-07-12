@@ -1,4 +1,12 @@
-"""AnalyzeReasonNode - analyze abnormal reasons with fast LLM fallback."""
+"""
+原因分析节点 — AnalyzeReasonNode。
+
+职责：
+  1. 将异常项、指标、证据组装 Prompt 调用 LLM 分析可能原因。
+  2. LLM 调用失败时降级到基于规则的兜底分析（_fallback_reason）。
+  3. 记录 LLM 调用统计（token 用量、成功/失败）。
+  4. 对输出内容做安全审核（content_moderator）。
+"""
 
 import json
 from pathlib import Path

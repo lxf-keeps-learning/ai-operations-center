@@ -200,11 +200,10 @@ def test_runtime_chat_records_prompt_version_and_span_chain(
     )
     PromptRepository().update_status(runtime_db_session, prompt.id, "active")
 
-    def fake_chat(
-        prompt_content: str | None,
-        user_message: str,
-        history: list[dict[str, str]] | None = None,
-    ) -> LlmResult:
+    import app.runtime.nodes.call_llm_node as _call_llm_node_mod
+    _original_llm = _call_llm_node_mod.llm_client
+
+    def _fake_chat(self, prompt_content=None, user_message="", history=None, **kw):
         assert prompt_content == prompt.content
         assert user_message == "分析今日高风险告警"
         assert history == []
@@ -213,15 +212,21 @@ def test_runtime_chat_records_prompt_version_and_span_chain(
             system_prompt=prompt.content,
         )
 
-    monkeypatch.setattr("app.runtime.nodes.call_llm_node.llm_client.chat", fake_chat)
+    _call_llm_node_mod.llm_client = type("FakeLlm", (), {
+        "chat": _fake_chat,
+        "stream_chat": _fake_chat,
+    })()
 
-    result = runtime_service.chat(
-        db=runtime_db_session,
-        user_id="u_sprint2",
-        message="分析今日高风险告警",
-        biz_type="alarm",
-        prompt_code="ioc_alarm_analysis",
-    )
+    try:
+        result = runtime_service.chat(
+            db=runtime_db_session,
+            user_id="u_sprint2",
+            message="分析今日高风险告警",
+            biz_type="alarm",
+            prompt_code="ioc_alarm_analysis",
+        )
+    finally:
+        _call_llm_node_mod.llm_client = _original_llm
 
     spans = trace_service.list_by_trace_id(runtime_db_session, result["trace_id"])
     span_types = [span.span_type for span in spans]
@@ -254,11 +259,10 @@ def test_runtime_chat_falls_back_to_system_prompt_when_code_missing(
 ) -> None:
     requested_code = "missing_runtime_prompt"
 
-    def fake_chat(
-        prompt_content: str | None,
-        user_message: str,
-        history: list[dict[str, str]] | None = None,
-    ) -> LlmResult:
+    import app.runtime.nodes.call_llm_node as _call_llm_node_mod
+    _original_llm2 = _call_llm_node_mod.llm_client
+
+    def _fake_chat2(self, prompt_content=None, user_message="", history=None, **kw):
         assert prompt_content is None
         assert user_message == "使用兜底提示词回答"
         assert history == []
@@ -267,14 +271,19 @@ def test_runtime_chat_falls_back_to_system_prompt_when_code_missing(
             system_prompt="内置 Runtime 系统 Prompt",
         )
 
-    monkeypatch.setattr("app.runtime.nodes.call_llm_node.llm_client.chat", fake_chat)
-
-    result = runtime_service.chat(
-        db=runtime_db_session,
-        user_id="u_prompt_fallback",
-        message="使用兜底提示词回答",
-        prompt_code=requested_code,
-    )
+    _call_llm_node_mod.llm_client = type("FakeLlm", (), {
+        "chat": _fake_chat2,
+        "stream_chat": _fake_chat2,
+    })()
+    try:
+        result = runtime_service.chat(
+            db=runtime_db_session,
+            user_id="u_prompt_fallback",
+            message="使用兜底提示词回答",
+            prompt_code=requested_code,
+        )
+    finally:
+        _call_llm_node_mod.llm_client = _original_llm2
 
     session = session_service.get_by_id(runtime_db_session, result["session_id"])
     spans = trace_service.list_by_trace_id(runtime_db_session, result["trace_id"])
@@ -303,11 +312,10 @@ def test_runtime_chat_passes_conversation_history_to_llm(
 ) -> None:
     calls: list[dict[str, object]] = []
 
-    def fake_chat(
-        prompt_content: str | None,
-        user_message: str,
-        history: list[dict[str, str]] | None = None,
-    ) -> LlmResult:
+    import app.runtime.nodes.call_llm_node as _call_llm_node_mod
+    _original_llm3 = _call_llm_node_mod.llm_client
+
+    def _fake_chat3(self, prompt_content=None, user_message="", history=None, **kw):
         calls.append(
             {
                 "prompt_content": prompt_content,
@@ -317,19 +325,24 @@ def test_runtime_chat_passes_conversation_history_to_llm(
         )
         return _fake_llm_result(f"回答：{user_message}")
 
-    monkeypatch.setattr("app.runtime.nodes.call_llm_node.llm_client.chat", fake_chat)
-
-    first = runtime_service.chat(
-        db=runtime_db_session,
-        user_id="u_sprint2",
-        message="记住：园区A今天有高风险告警",
-    )
-    runtime_service.chat(
-        db=runtime_db_session,
-        user_id="u_sprint2",
-        message="我刚才说的是哪个园区？",
-        conversation_id=first["conversation_id"],
-    )
+    _call_llm_node_mod.llm_client = type("FakeLlm", (), {
+        "chat": _fake_chat3,
+        "stream_chat": _fake_chat3,
+    })()
+    try:
+        first = runtime_service.chat(
+            db=runtime_db_session,
+            user_id="u_sprint2",
+            message="记住：园区A今天有高风险告警",
+        )
+        runtime_service.chat(
+            db=runtime_db_session,
+            user_id="u_sprint2",
+            message="我刚才说的是哪个园区？",
+            conversation_id=first["conversation_id"],
+        )
+    finally:
+        _call_llm_node_mod.llm_client = _original_llm3
 
     assert calls[0]["history"] == []
     assert calls[1]["history"] == [

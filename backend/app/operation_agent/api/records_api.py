@@ -80,6 +80,7 @@ def get_record_detail(record_id: int, db: Session = Depends(get_db)) -> ApiRespo
         "risk_items": record.risk_items_json,
         "advice_items": record.advice_items_json,
         "evidence": record.evidence_json,
+        "analysis_basis": (record.evidence_json or {}).get("analysis_basis", {}),
         "model_name": record.model_name,
         "input_tokens": record.input_tokens,
         "output_tokens": record.output_tokens,

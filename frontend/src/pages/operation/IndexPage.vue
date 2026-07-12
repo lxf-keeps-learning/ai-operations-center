@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import type { OperationAnalyzeParams, OperationResult } from '@/api/operation'
+import type { AnalysisBasis, OperationAnalyzeParams, OperationResult } from '@/api/operation'
 import { getRecordDetail, getDownloadUrl, listRecords, type AnalysisRecord, type AnalysisRecordDetail } from '@/api/records'
 import { buildRequestKey, useOperationStore } from '@/stores/operation'
 import ReportChatPanel from '@/components/ReportChatPanel.vue'
@@ -53,23 +53,25 @@ const loadingRecords = ref(false)
 const loadingDetail = ref(false)
 const userSelected = ref(false)
 const error = ref('')
-const now = ref(Date.now())
 const activeAnalysisParams = ref<OperationAnalyzeParams | null>(null)
 const activeAnalysisKey = ref('')
-let countdownTimer: ReturnType<typeof setInterval> | null = null
 
-onMounted(() => {
-  countdownTimer = setInterval(() => { now.value = Date.now() }, 10_000)
-  void fetchRecords().then(() => {
-    const match = cooldownRecord.value
-    if (match) {
-      void selectRecord(match.id, false)
-    }
-  })
+onMounted(async () => {
+  const shouldGenerate = queryValue('generate') === '1' && queryValue('source') === 'overview_ai'
+  if (queryValue('generate') || queryValue('source')) {
+    await clearGenerateIntent()
+  }
+  if (shouldGenerate) {
+    // 从运营总览进入生成流程时，也要先加载当前领域的历史报告。
+    // 否则 startRequestedAnalysis 后直接 return，左侧只剩生成中占位项。
+    await fetchRecords()
+    startRequestedAnalysis()
+    return
+  }
+  await loadMatchingReport()
 })
 
 onUnmounted(() => {
-  if (countdownTimer !== null) clearInterval(countdownTimer)
   progressStore.cancelStream()
 })
 
@@ -114,13 +116,41 @@ function renderMarkdown(text: string): string {
   return renderSafeMarkdown(text, { stripOperationHeading: true })
 }
 
-function startAnalysis(forceRefresh = true) {
-  const params = { ...analysisParams.value, force_refresh: forceRefresh }
+function startRequestedAnalysis() {
+  const params = { ...analysisParams.value, force_refresh: true }
   activeAnalysisParams.value = params
   activeAnalysisKey.value = buildRequestKey(params)
   selectedRecord.value = null
   userSelected.value = false
   progressStore.startStreamAnalysis(params)
+}
+
+async function clearGenerateIntent() {
+  const query = { ...route.query }
+  delete query.generate
+  delete query.source
+  await router.replace({ path: '/operation', query })
+}
+
+async function loadMatchingReport() {
+  await fetchRecords()
+  const match = matchingRecords.value[0]
+  if (match) {
+    await selectRecord(match.id, false)
+    return
+  }
+  selectedRecord.value = null
+  userSelected.value = false
+}
+
+function selectDomain(domain: string) {
+  const query = { ...route.query }
+  query.domain = domain
+  query.active_tab = domainLabel[domain] || domain
+  delete query.generate
+  delete query.source
+  delete query.tab
+  void router.replace({ path: '/operation', query })
 }
 
 function downloadReport() {
@@ -215,8 +245,6 @@ function formatTime(iso: string | null): string {
   return iso.slice(0, 19).replace('T', ' ')
 }
 
-const THIRTY_MIN = 30 * 60 * 1000
-
 const domainRecords = computed(() => {
   const domain = queryDomain.value
   return records.value.filter(r => r.domain === domain)
@@ -224,34 +252,6 @@ const domainRecords = computed(() => {
 
 const matchingRecords = computed(() => {
   return domainRecords.value.filter(recordMatchesCurrentParams)
-})
-
-const cooldownRecord = computed(() => {
-  const list = matchingRecords.value
-  return list.length > 0 ? list[0] : null
-})
-
-const currentRecord = computed(() => {
-  if (userSelected.value && selectedRecord.value) return selectedRecord.value
-  return cooldownRecord.value
-})
-
-const currentRecordTime = computed(() => {
-  const record = currentRecord.value
-  if (!record?.created_at) return null
-  const t = new Date(record.created_at).getTime()
-  return Number.isNaN(t) ? null : t
-})
-
-const cooldownRemaining = computed(() => {
-  if (!currentRecordTime.value) return 0
-  const elapsed = now.value - currentRecordTime.value
-  return Math.max(0, THIRTY_MIN - elapsed)
-})
-
-const canGenerate = computed(() => {
-  if (store.loading || progressStore.loading) return false
-  return !isGenerating.value
 })
 
 const isGenerating = computed(() => {
@@ -263,34 +263,11 @@ const isGenerating = computed(() => {
 
 const pageError = computed(() => error.value || progressStore.error || store.error)
 
-const cooldownHint = computed(() => {
-  if (store.loading || progressStore.loading) return ''
-  const remain = cooldownRemaining.value
-  const record = currentRecord.value
-  const time = record?.created_at
-  if (!record || !time) return ''
-  const label = record?.report_name || '报告'
-  if (remain > 0) {
-    const minutes = Math.ceil(remain / 60000)
-    return `当前筛选条件下「${label}」生成于 ${formatTime(time)}。点击重新生成会绕过缓存，并产生新一次模型调用；自动加载仍会复用最近报告（约 ${minutes} 分钟）。`
-  }
-  return `当前筛选条件下已有「${label}」，可按需重新生成。`
-})
-
-const generateButtonText = computed(() => {
-  if (isGenerating.value) return '分析中...'
-  return currentRecord.value ? '重新生成报告' : '生成报告'
-})
-
-watch(queryDomain, () => {
+watch(analysisKey, () => {
   selectedRecord.value = null
   userSelected.value = false
-  void fetchRecords().then(() => {
-    const first = domainRecords.value[0]
-    if (first) {
-      void selectRecord(first.id, false)
-    }
-  })
+  store.reset()
+  void loadMatchingReport()
 })
 
 watch(
@@ -355,8 +332,37 @@ function normalizeStreamResult(payload: Record<string, unknown>): OperationResul
     risk_items: toRecordList(payload.risk_items),
     advice_items: toRecordList(payload.advice_items),
     evidence: toRecordList(payload.evidence),
+    analysis_basis: normalizeAnalysisBasis(payload.analysis_basis),
     errors: toRecordList(payload.errors),
   }
+}
+
+function normalizeAnalysisBasis(value: unknown): AnalysisBasis {
+  const basis = isRecord(value) ? value : {}
+  return {
+    schema_version: typeof basis.schema_version === 'string' ? basis.schema_version : '1.0',
+    data_evidence: toRecordList(basis.data_evidence),
+    knowledge_evidence: toRecordList(basis.knowledge_evidence),
+    knowledge_status: typeof basis.knowledge_status === 'string' ? basis.knowledge_status : 'not_used',
+    knowledge_note: typeof basis.knowledge_note === 'string' ? basis.knowledge_note : '本次常规报告未使用知识库依据。',
+    facts: toRecordList(basis.facts),
+    hypotheses: toRecordList(basis.hypotheses),
+    assumptions: toStringList(basis.assumptions),
+    verification_steps: toStringList(basis.verification_steps),
+    reasoning_confidence: typeof basis.reasoning_confidence === 'number' ? basis.reasoning_confidence : 0,
+    advice_confidence: typeof basis.advice_confidence === 'number' ? basis.advice_confidence : 0,
+  }
+}
+
+function toStringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
+function confidenceText(value: unknown): string {
+  const score = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(score)) return '-'
+  const label = score >= 0.85 ? '高' : score >= 0.6 ? '中' : '低'
+  return `${label}（${Math.round(score * 100)}%）`
 }
 
 function toRecordList(value: unknown): Record<string, unknown>[] {
@@ -382,12 +388,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
         v-for="tab in domainTabs"
         :key="tab.key"
         :class="['domain-tab', { 'domain-tab--active': queryDomain === tab.key }]"
-        @click="router.replace({ path: '/operation', query: { ...route.query, domain: tab.key } })"
+        @click="selectDomain(tab.key)"
       >
         {{ tab.label }}
       </button>
     </div>
 
+
+    <div class="analyze-bar">
+      <div class="analyze-bar__params">
+        <span class="param-tag">{{ activeDomain }}</span>
+        <span v-if="activeTab !== activeDomain" class="param-tag">{{ activeTab }}</span>
+        <span class="param-tag">{{ timeDimensionLabel(queryTimeDim) }}</span>
+        <span v-if="queryDate" class="param-tag">{{ queryDate }}</span>
+      </div>
+      <p class="analyze-bar__hint">
+        新报告仅从运营总览首页的「AI 智能分析」入口生成；切换页签或刷新只展示已有报告。
+      </p>
+    </div>
 
     <p v-if="pageError" class="page-error">{{ pageError }}</p>
 
@@ -452,6 +470,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
                   </span>
                 </div>
               </div>
+              <div v-if="progressStore.streamedReport" class="streaming-report">
+                <div class="streaming-report__title">报告内容生成中</div>
+                <div
+                  class="streaming-report__body markdown-content"
+                  v-html="renderMarkdown(progressStore.streamedReport)"
+                />
+              </div>
             </div>
           </div>
         </template>
@@ -499,16 +524,46 @@ function isRecord(value: unknown): value is Record<string, unknown> {
                 <p class="advice-card__action">{{ item.action }}</p>
                 <p v-if="item.owner_role" class="advice-card__meta">负责人：{{ item.owner_role }}</p>
                 <p v-if="item.expected_result" class="advice-card__meta">预期：{{ item.expected_result }}</p>
+                <p v-if="item.confidence !== undefined" class="advice-card__meta">建议置信度：{{ confidenceText(item.confidence) }}</p>
+                <p v-if="Array.isArray(item.assumptions) && item.assumptions.length" class="advice-card__boundary">
+                  边界：{{ item.assumptions.join('；') }}
+                </p>
               </div>
             </div>
-            <div v-if="store.result!.evidence.length" class="result-section">
-              <h3>数据依据</h3>
+            <div v-if="store.result!.evidence.length || store.result!.analysis_basis.knowledge_note" class="result-section">
+              <h3>分析依据分层</h3>
+              <div class="basis-summary">
+                <span class="basis-badge basis-badge--fact">业务事实</span>
+                <span>原因分析置信度：{{ confidenceText(store.result!.analysis_basis.reasoning_confidence) }}</span>
+                <span>建议置信度：{{ confidenceText(store.result!.analysis_basis.advice_confidence) }}</span>
+              </div>
+              <h4>业务数据依据</h4>
               <div class="evidence-list">
                 <div v-for="(ev, i) in store.result!.evidence" :key="i" class="evidence-item">
                   <span class="evidence-source">{{ ev.source }}</span>
                   <span class="evidence-desc">{{ ev.description }}</span>
                 </div>
               </div>
+              <h4>知识与制度依据</h4>
+              <div v-if="store.result!.analysis_basis.knowledge_evidence.length" class="evidence-list">
+                <div v-for="(ev, i) in store.result!.analysis_basis.knowledge_evidence" :key="i" class="evidence-item">
+                  <span class="evidence-source">{{ ev.source }}</span>
+                  <span class="evidence-desc">{{ ev.description }}</span>
+                </div>
+              </div>
+              <p v-else class="knowledge-note">{{ store.result!.analysis_basis.knowledge_note }}</p>
+              <template v-if="store.result!.analysis_basis.assumptions.length">
+                <h4>分析假设</h4>
+                <ul class="basis-list">
+                  <li v-for="(item, i) in store.result!.analysis_basis.assumptions" :key="i">{{ item }}</li>
+                </ul>
+              </template>
+              <template v-if="store.result!.analysis_basis.verification_steps.length">
+                <h4>待核查事项</h4>
+                <ul class="basis-list">
+                  <li v-for="(item, i) in store.result!.analysis_basis.verification_steps" :key="i">{{ item }}</li>
+                </ul>
+              </template>
             </div>
             <div class="result-meta">
               <span>状态：{{ store.result!.status }}</span>
@@ -533,7 +588,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
         <template v-else>
           <div class="report-preview__empty">
-            <p>选择左侧分析记录，或点击「生成报告」开始新的分析。</p>
+            <p>当前筛选条件下暂无报告。请返回运营总览首页，点击「AI 智能分析」生成新报告。</p>
           </div>
         </template>
       </section>
@@ -878,6 +933,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   gap: 0;
 }
 
+.streaming-report {
+  border-top: 1px solid var(--color-border);
+  margin-top: 16px;
+  padding-top: 16px;
+}
+
+.streaming-report__title {
+  color: var(--color-primary);
+  font-size: 13px;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.streaming-report__body {
+  max-height: 360px;
+  overflow-y: auto;
+}
+
 .step-item {
   align-items: center;
   display: flex;
@@ -1091,6 +1164,58 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   color: var(--color-text-muted);
   font-size: 13px;
   margin: 2px 0;
+}
+
+.advice-card__boundary {
+  background: #fffbeb;
+  border-left: 3px solid #f59e0b;
+  color: #854d0e;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 8px 0 0;
+  padding: 6px 10px;
+}
+
+.basis-summary {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 13px;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+}
+
+.basis-badge {
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 9px;
+}
+
+.basis-badge--fact {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.knowledge-note {
+  background: #eff6ff;
+  border-left: 3px solid #3b82f6;
+  color: #1e40af;
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 8px 12px;
+}
+
+.basis-list {
+  color: var(--color-text);
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 6px 0 14px;
+  padding-left: 20px;
 }
 
 .evidence-list {

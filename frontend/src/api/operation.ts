@@ -1,5 +1,19 @@
 import { request } from '@/utils/request'
 
+export interface AnalysisBasis {
+  schema_version?: string
+  data_evidence: Record<string, unknown>[]
+  knowledge_evidence: Record<string, unknown>[]
+  knowledge_status: string
+  knowledge_note: string
+  facts: Record<string, unknown>[]
+  hypotheses: Record<string, unknown>[]
+  assumptions: string[]
+  verification_steps: string[]
+  reasoning_confidence: number
+  advice_confidence: number
+}
+
 export interface OperationResult {
   record_id: number | null
   trace_id: string
@@ -9,6 +23,7 @@ export interface OperationResult {
   risk_items: Record<string, unknown>[]
   advice_items: Record<string, unknown>[]
   evidence: Record<string, unknown>[]
+  analysis_basis: AnalysisBasis
   errors: Record<string, unknown>[]
 }
 

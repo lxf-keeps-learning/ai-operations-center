@@ -3,26 +3,33 @@ call_llm — LLM 调用节点。
 
 负责：
   1. 记录上下文查询 Tool Span（历史消息）
-  2. 检测当前请求是否期望流式输出（通过 ContextVar）
-  3. 调用 LLM（同步 chat 或流式 stream_chat）
-  4. 记录 LLM 调用 Span（含 model、tokens、耗时等）
+  2. 调用 LLM（流式 stream_chat 或 同步 chat）
+  3. 记录 LLM 调用 Span（含 model、tokens、耗时等）
 
-流式场景下，LLM 的 token 通过 ContextVar 注册的回调实时回传，
+流式场景下，LLM 的 token 通过 get_stream_writer() 以 custom 事件实时回传；
 非流式场景下直接调用 chat() 获取完整回复。
 """
-
 from time import perf_counter
+
+from langgraph.config import get_stream_writer
 
 from app.core.config.llm_settings import llm_settings
 from app.runtime.llm.client import llm_client
 from app.runtime.schemas.trace_schema import TraceCreate
 from app.runtime.services.trace_service import trace_service
-from app.runtime.stream_context import get_llm_stream_callback
 from app.runtime.state import RuntimeGraphState
 from app.utils.ids import new_span_id
 
 # Trace 中 tool_name 字段的值，表示历史消息上下文来源
 CONTEXT_TOOL_NAME = "mysql_conversation_history"
+
+
+def _stream_writer_or_none():
+    """取得 LangGraph writer；节点被独立调用时返回 None。"""
+    try:
+        return get_stream_writer()
+    except RuntimeError:
+        return None
 
 
 def call_llm_node(state: RuntimeGraphState) -> RuntimeGraphState:
@@ -61,14 +68,20 @@ def call_llm_node(state: RuntimeGraphState) -> RuntimeGraphState:
     )
 
     # ── 调用 LLM ──
-    # 通过 ContextVar 检测当前请求是否需要流式输出
-    stream_callback = get_llm_stream_callback()
+    # 在 astream 模式下用 get_stream_writer() 实时回传 token
+    # 在 invoke 模式下直接调用 chat()（不流式输出 token）
+    writer = _stream_writer_or_none() if state.get("_streaming") else None
 
-    if stream_callback:
+    if writer is not None:
+        def on_chunk(text: str) -> None:
+            writer({
+                "kind": "llm_token",
+                "token": text,
+            })
         llm_result = llm_client.stream_chat(
             prompt.content if prompt else None,
             message,
-            on_chunk=stream_callback,
+            on_chunk=on_chunk,
             history=history_messages,
         )
     else:

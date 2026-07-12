@@ -38,6 +38,7 @@ const quickQuestions = [
 
 const messages = ref<ReportChatMessage[]>([])
 const input = ref('')
+const composingInput = ref(false)
 const conversationId = ref('')
 const sessionId = ref('')
 const lastRuntimeSessionId = ref('')
@@ -218,6 +219,14 @@ async function sendCurrentMessage() {
   })
 }
 
+function handleInputEnter(event: KeyboardEvent) {
+  // 输入法候选确认阶段的 Enter 只用于完成组合输入，不能触发发送。
+  // keyCode=229 用于兼容部分浏览器没有正确设置 isComposing 的情况。
+  if (composingInput.value || event.isComposing || event.keyCode === 229) return
+  event.preventDefault()
+  void sendCurrentMessage()
+}
+
 function isActiveStream(reportId: number, streamSessionId: string): boolean {
   return activeReportId.value === reportId && sessionId.value === streamSessionId
 }
@@ -395,16 +404,18 @@ function resolveReportChatUserId(explicitUserId: string): string {
 
       <p v-if="error" class="report-chat__error">{{ error }}</p>
 
-      <form class="report-chat__input-area" @submit.prevent="sendCurrentMessage">
+      <form class="report-chat__input-area" @submit.prevent>
         <textarea
           v-model="input"
           class="report-chat__input"
           rows="2"
           placeholder="围绕当前报告继续追问..."
           :disabled="loadingSession || sending"
-          @keydown.enter.exact.prevent="sendCurrentMessage"
+          @compositionstart="composingInput = true"
+          @compositionend="composingInput = false"
+          @keydown.enter.exact="handleInputEnter"
         />
-        <button type="submit" class="report-chat__send" :disabled="!canSend">
+        <button type="button" class="report-chat__send" :disabled="!canSend" @click="sendCurrentMessage">
           {{ sending ? '发送中' : '发送' }}
         </button>
       </form>

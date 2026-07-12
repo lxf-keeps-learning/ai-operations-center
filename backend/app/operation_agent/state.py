@@ -39,6 +39,7 @@ class OperationState(TypedDict, total=False):
     advice_items    — GenerateAdviceNode 生成的改进建议列表
 
     evidence        — 数据来源证据链，贯穿整个分析过程
+    analysis_basis  — 事实、分析假设、数据依据、知识依据和待核查步骤
     final_answer    — SummaryNode 生成的最终 Markdown 结论
     llm_usages      — 各 LLM 调用的 token 使用记录（累计，用于写入 usage 表）
 
@@ -64,10 +65,12 @@ class OperationState(TypedDict, total=False):
     advice_items: list[dict[str, Any]]
 
     evidence: list[dict[str, Any]]
+    analysis_basis: dict[str, Any]
     final_answer: str
     llm_usages: list[dict[str, Any]]
 
     event_log: NotRequired[list[dict[str, Any]]]
     _event_persistence_disabled: NotRequired[bool]
+    _streaming: NotRequired[bool]
 
     errors: list[dict[str, Any]]

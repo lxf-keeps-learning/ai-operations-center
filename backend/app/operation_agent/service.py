@@ -11,6 +11,7 @@ OperationService — 运营分析业务入口。
 """
 import logging
 
+from app.operation_agent.analysis_basis import build_analysis_basis
 from app.db.session import get_session_local
 from app.operation_agent.graph import operation_graph
 from app.operation_agent.schemas.request import OperationAnalyzeRequest
@@ -122,6 +123,7 @@ def _blocked_result(
         "risk_items": [],
         "advice_items": [],
         "evidence": [],
+        "analysis_basis": {},
         "final_answer": message or "您的输入包含违规内容，已被系统拦截。",
         "llm_usages": [],
         "errors": [],
@@ -129,7 +131,7 @@ def _blocked_result(
 
 
 def state_from_record(record, page_context: dict, user_context: dict) -> OperationState:
-    return {
+    state: OperationState = {
         "record_id": record.id,
         "trace_id": record.trace_id,
         "trigger_type": page_context.get("trigger_type", "tab_analysis"),
@@ -143,7 +145,15 @@ def state_from_record(record, page_context: dict, user_context: dict) -> Operati
         "risk_items": (record.risk_items_json or {}).get("items", []) if record.risk_items_json else [],
         "advice_items": (record.advice_items_json or {}).get("items", []) if record.advice_items_json else [],
         "evidence": (record.evidence_json or {}).get("items", []) if record.evidence_json else [],
+        "analysis_basis": (
+            (record.evidence_json or {}).get("analysis_basis", {})
+            if record.evidence_json
+            else {}
+        ),
         "final_answer": record.final_answer_markdown or "",
         "llm_usages": [],
         "errors": [],
     }
+    if not state["analysis_basis"]:
+        state["analysis_basis"] = build_analysis_basis(state)
+    return state

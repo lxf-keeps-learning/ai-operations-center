@@ -1,4 +1,12 @@
-"""GenerateAdviceNode - generate actionable advice with fast LLM fallback."""
+"""
+建议生成节点 — GenerateAdviceNode。
+
+职责：
+  1. 将异常项、原因分析、证据组装 Prompt 调用 LLM 生成处置建议。
+  2. LLM 返回的 JSON 建议列表做归一化（_normalize_advice_items）。
+  3. LLM 调用失败时降级到基于规则的兜底建议（_fallback_advice）。
+  4. 对输出做安全审核，敏感内容直接清空 advice_items。
+"""
 
 import json
 from pathlib import Path
@@ -56,12 +64,18 @@ def generate_advice_node(state: OperationState) -> OperationState:
         })
         if result.success:
             parsed = _parse_advice(result.content)
-            state["advice_items"] = parsed if parsed else _fallback_advice(abnormal)
+            state["advice_items"] = _normalize_advice_items(
+                parsed if parsed else _fallback_advice(abnormal),
+                default_confidence=0.6 if parsed else 0.5,
+            )
         else:
             errors.append(
                 {"node": "generate_advice", "message": f"LLM 调用失败: {result.error_message}"}
             )
-            state["advice_items"] = _fallback_advice(abnormal)
+            state["advice_items"] = _normalize_advice_items(
+                _fallback_advice(abnormal),
+                default_confidence=0.45,
+            )
     except Exception as e:
         llm_usages.append({
             "action_type": "generate_advice",
@@ -73,7 +87,10 @@ def generate_advice_node(state: OperationState) -> OperationState:
             "error_message": str(e),
         })
         errors.append({"node": "generate_advice", "message": f"LLM 调用异常: {e}"})
-        state["advice_items"] = _fallback_advice(abnormal)
+        state["advice_items"] = _normalize_advice_items(
+            _fallback_advice(abnormal),
+            default_confidence=0.45,
+        )
 
     state["llm_usages"] = llm_usages
     state["errors"] = errors
@@ -117,6 +134,34 @@ def _fallback_advice(abnormal: list[dict]) -> list[dict]:
             }
         )
     return items
+
+
+def _normalize_advice_items(items: list[dict], *, default_confidence: float) -> list[dict]:
+    """Make the evidence boundary explicit for every recommendation."""
+
+    normalized = []
+    for item in items:
+        data_evidence = item.get("data_evidence") or item.get("evidence") or []
+        name = item.get("title") or "当前异常"
+        verification_steps = item.get("verification_steps") or [
+            f"核对{name}对应的业务记录和现场情况，确认原因后再执行建议。"
+        ]
+        normalized.append(
+            {
+                **item,
+                "conclusion_type": "recommendation",
+                "confidence": float(item.get("confidence", default_confidence)),
+                "data_evidence": data_evidence,
+                "knowledge_evidence": item.get("knowledge_evidence") or [],
+                "assumptions": item.get("assumptions") or [
+                    "该建议基于当前业务数据和可能原因生成，尚未引用制度、SOP 或历史案例。"
+                ],
+                "verification_steps": verification_steps,
+                # Keep the original field for existing API/UI consumers.
+                "evidence": data_evidence,
+            }
+        )
+    return normalized
 
 
 def _owner_for_domain(domain: str) -> str:

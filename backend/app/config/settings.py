@@ -52,6 +52,15 @@ class Settings(BaseSettings):
         le=1.0,
         description="RAG 决策置信度阈值。LLM 判断置信度低于此值时 fallback 到规则。",
     )
+    mcp_enabled: bool = Field(
+        default=True,
+        description="是否启用 MCP Server（SSE 传输）。关闭时不在主流程挂载 MCP SSE 端点。",
+    )
+    mcp_mount_path: str = Field(
+        default="/mcp",
+        description="MCP SSE Server 挂载路径",
+    )
+
     rag_query_rewrite_confidence_threshold: float = Field(
         default=0.65,
         ge=0.0,

@@ -116,6 +116,27 @@ class TestOperationGraph:
         assert "advice_items" in operation_result
         assert isinstance(operation_result["advice_items"], list)
 
+    def test_analysis_basis_separates_data_and_knowledge_evidence(
+        self,
+        operation_result: OperationState,
+    ):
+        basis = operation_result["analysis_basis"]
+        assert basis["data_evidence"]
+        assert basis["knowledge_evidence"] == []
+        assert basis["knowledge_status"] == "not_used"
+        assert basis["hypotheses"]
+        assert basis["assumptions"]
+        assert basis["verification_steps"]
+        assert 0 < basis["reasoning_confidence"] < 1
+
+    def test_advice_declares_evidence_boundary(self, operation_result: OperationState):
+        advice = operation_result["advice_items"][0]
+        assert advice["conclusion_type"] == "recommendation"
+        assert advice["knowledge_evidence"] == []
+        assert advice["assumptions"]
+        assert advice["verification_steps"]
+        assert 0 < advice["confidence"] < 1
+
     def test_trace_id_generated(self, operation_result: OperationState):
         assert operation_result.get("trace_id", "").startswith("trace_")
 
@@ -204,6 +225,8 @@ async def test_operation_analyze_api_returns_closed_loop_payload(
     assert data["risk_items"]
     assert data["advice_items"]
     assert data["evidence"]
+    assert data["analysis_basis"]["knowledge_status"] == "not_used"
+    assert data["analysis_basis"]["knowledge_evidence"] == []
 
 
 @pytest.mark.anyio
@@ -309,7 +332,8 @@ def test_operation_report_normalizes_llm_report_shell(monkeypatch: pytest.Monkey
     assert "好的，作为企业级智能运营中心" not in final_answer
     assert "报告时间：" not in final_answer
     assert "# 运营状态分析报告" not in final_answer
-    assert "#### 原因分析" in final_answer
+    assert "#### 可能原因（分析推测）" in final_answer
+    assert "不等同于已确认根因" in final_answer
     assert "**整体状态判断**" in final_answer
 
 

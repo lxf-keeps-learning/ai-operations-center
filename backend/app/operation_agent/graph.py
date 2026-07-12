@@ -12,6 +12,7 @@ State 是模块间传递数据的唯一契约，节点之间不直接调用。
 from collections.abc import Callable
 from itertools import pairwise
 
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, StateGraph, START
 
 from app.operation_agent.nodes.analyze_reason_node import analyze_reason_node
@@ -36,18 +37,59 @@ OPERATION_NODE_SPECS: tuple[tuple[str, str, OperationNode], ...] = (
     ("summary", "报告汇总", summary_node),
 )
 
+# 节点名称与消息映射，供 Adapter 和前端使用
+NODE_METADATA: dict[str, dict[str, str]] = {
+    node_key: {
+        "name": node_name,
+        "message_started": f"{node_name}中",
+        "message_completed": f"{node_name}完成",
+    }
+    for node_key, node_name, _ in OPERATION_NODE_SPECS
+}
+
+
+def _with_stream_events(
+    node_key: str,
+    node_name: str,
+    node_func: OperationNode,
+) -> OperationNode:
+    """包装节点函数，在节点开始执行时发射 node_started 自定义事件。
+
+    包装器通过 get_stream_writer() 发送 LangGraph Custom Stream Event。
+    该事件仅在 astream(stream_mode="custom") 时可见，invoke 时 get_stream_writer()
+    返回 no-op writer，不影响同步路径。
+    """
+    def wrapped(state: OperationState) -> OperationState:
+        try:
+            writer = get_stream_writer()
+            writer({
+                "kind": "node_started",
+                "node_key": node_key,
+                "node_name": node_name,
+            })
+        except RuntimeError:
+            pass
+        return node_func(state)
+    return wrapped
+
 
 def build_operation_graph() -> StateGraph:
     """
     构建运营分析 Graph。
 
+    每个节点被 _with_stream_events 包装，自动在节点入口处发射
+    custom node_started 事件。
+
     返回一个已 compile 的 StateGraph 实例。
-    该实例可以被多次 invoke，每次接收一个新的 OperationState 作为输入。
+    该实例可以被多次 invoke / astream，每次接收一个新的 OperationState 作为输入。
     """
     graph = StateGraph(OperationState)
 
-    for node_key, _node_name, node_func in OPERATION_NODE_SPECS:
-        graph.add_node(node_key, node_func)
+    for node_key, node_name, node_func in OPERATION_NODE_SPECS:
+        graph.add_node(
+            node_key,
+            _with_stream_events(node_key, node_name, node_func),
+        )
 
     node_keys = [node_key for node_key, _node_name, _node_func in OPERATION_NODE_SPECS]
     graph.add_edge(START, node_keys[0])

@@ -29,6 +29,12 @@ from app.utils.ids import new_trace_id
 # 前端可通过此请求头传入 traceId，后端复用；未传入则由后端自动生成
 TRACE_ID_HEADER = "X-Trace-Id"
 
+MCP_SKIP_PREFIXES = ("/mcp",)
+
+
+def _should_skip(path: str) -> bool:
+    return any(path.startswith(p) for p in MCP_SKIP_PREFIXES)
+
 
 def _split_header(value: str | None) -> list[str]:
     if not value:
@@ -42,6 +48,9 @@ def register_trace_middleware(app):
     @app.middleware("http")
     async def trace_middleware(request: Request, call_next):
         """每个 HTTP 请求处理前初始化上下文，请求结束后清理"""
+
+        if _should_skip(request.url.path):
+            return await call_next(request)
 
         trace_id = request.headers.get(TRACE_ID_HEADER) or new_trace_id()
         set_trace_id(trace_id)

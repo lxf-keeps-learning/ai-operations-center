@@ -1,11 +1,24 @@
-"""SummaryNode - render the final operation analysis markdown."""
+"""
+报告汇总节点 — SummaryNode。
+
+职责：
+  1. 从 State 中提取指标、异常、原因分析、建议、证据等全部数据。
+  2. 按固定模板组装 Markdown 格式的运营分析报告。
+  3. 处理 LLM 输出的格式（去除 Markdown 样板文字、标题规范化）。
+  4. 将最终报告写入 state["final_answer"]。
+"""
 
 import re
 
+from langgraph.config import get_stream_writer
+
+from app.operation_agent.analysis_basis import build_analysis_basis
 from app.operation_agent.state import OperationState
 
 
 def summary_node(state: OperationState) -> OperationState:
+    analysis_basis = build_analysis_basis(state)
+    state["analysis_basis"] = analysis_basis
     metrics = state.get("metrics", [])
     abnormal = state.get("abnormal_items", [])
     risk_items = state.get("risk_items", [])
@@ -77,7 +90,12 @@ def summary_node(state: OperationState) -> OperationState:
 
     lines.append("### 3. 异常与风险")
     if reason:
-        lines.append("#### 原因分析")
+        lines.append("#### 可能原因（分析推测）")
+        lines.append(
+            f"> 当前置信度：{_confidence_label(analysis_basis.get('reasoning_confidence', 0.0))}。"
+            "以下内容是基于数据关联的可能性分析，不等同于已确认根因。"
+        )
+        lines.append("")
         lines.extend(_normalize_reason_lines(reason))
         lines.append("")
     if abnormal:
@@ -120,7 +138,8 @@ def summary_node(state: OperationState) -> OperationState:
         lines.append("当前无待处理建议。")
     lines.append("")
 
-    lines.append("### 5. 数据依据")
+    lines.append("### 5. 分析依据分层")
+    lines.append("#### 5.1 业务数据依据")
     if evidence:
         lines.append("| 数据来源 | 说明 |")
         lines.append("|------|------|")
@@ -129,7 +148,29 @@ def summary_node(state: OperationState) -> OperationState:
             description = item.get("description", "")
             lines.append(f"| {_cell(source)} | {_cell(description)} |")
     else:
-        lines.append("本次分析无外部数据引用。")
+        lines.append("本次分析无可用业务数据引用。")
+    lines.append("")
+    lines.append("#### 5.2 知识与制度依据")
+    knowledge_evidence = analysis_basis.get("knowledge_evidence", [])
+    if knowledge_evidence:
+        lines.append("| 知识来源 | 说明 |")
+        lines.append("|------|------|")
+        for item in knowledge_evidence:
+            lines.append(
+                f"| {_cell(item.get('source', ''))} | {_cell(item.get('description', ''))} |"
+            )
+    else:
+        lines.append(f"> {analysis_basis.get('knowledge_note', '本次未使用知识库依据。')}")
+    assumptions = analysis_basis.get("assumptions", [])
+    verification_steps = analysis_basis.get("verification_steps", [])
+    if assumptions:
+        lines.append("")
+        lines.append("#### 5.3 分析假设")
+        lines.extend(f"- {item}" for item in assumptions)
+    if verification_steps:
+        lines.append("")
+        lines.append("#### 5.4 待核查事项")
+        lines.extend(f"- {item}" for item in verification_steps)
     if errors:
         lines.append("")
         lines.append("### 6. 处理过程提示")
@@ -138,8 +179,26 @@ def summary_node(state: OperationState) -> OperationState:
         for error in errors:
             lines.append(f"| {_cell(error.get('node', ''))} | {_cell(error.get('message', ''))} |")
 
-    state["final_answer"] = "\n".join(lines)
+    final_answer = "\n".join(lines)
+    state["final_answer"] = final_answer
+    _stream_report(final_answer, state)
     return state
+
+
+def _stream_report(final_answer: str, state: OperationState) -> None:
+    """在 Native Streaming 路径中按 Markdown 段落发出真实报告增量。"""
+    if not state.get("_streaming"):
+        return
+    try:
+        writer = get_stream_writer()
+    except RuntimeError:
+        return
+
+    # 保留段落分隔符，确保所有 delta 拼接后与最终报告完全一致。
+    chunks = re.findall(r".*?(?:\n\n|\Z)", final_answer, flags=re.DOTALL)
+    for chunk in chunks:
+        if chunk:
+            writer({"kind": "report_delta", "delta": chunk})
 
 
 def _domain_label(domain: str) -> str:
@@ -181,6 +240,14 @@ def _time_dimension_label(value: str) -> str:
         "quarter": "季维度",
         "year": "年维度",
     }.get(value, value or "-")
+
+
+def _confidence_label(value: float) -> str:
+    if value >= 0.85:
+        return f"高（{value:.0%}）"
+    if value >= 0.6:
+        return f"中（{value:.0%}）"
+    return f"低（{value:.0%}）"
 
 
 def _cell(value: object) -> str:

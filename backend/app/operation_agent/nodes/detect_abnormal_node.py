@@ -1,4 +1,14 @@
-"""DetectAbnormalNode - rule-based abnormal and risk detection."""
+"""
+异常检测节点 — DetectAbnormalNode。
+
+职责：
+  1. 遍历 metrics 列表，对每个指标按 metric_code 做阈值规则检查。
+  2. 分析告警、隐患、工单列表，识别未闭环的高等级记录。
+  3. 汇总异常项并排序（按严重等级），写入 state["abnormal_items"]。
+  4. 将异常项转为风险条目写入 state["risk_items"]。
+
+本节点完全基于规则，不调用 LLM 或外部 Tool。
+"""
 
 from app.operation_agent.state import OperationState
 

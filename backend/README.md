@@ -37,10 +37,12 @@
 | AI Runtime 主流程                      | `app/runtime/runtime_service.py`                                                  | Runtime Chat 的会话、Prompt、LLM 调用、Trace 记录编排                                       |
 | LLM 调用适配                           | `app/runtime/llm/client.py`                                                       | Provider 选择、消息组装、模型调用、token/错误信息封装                                       |
 | Runtime 数据访问                       | `app/runtime/models/`、`app/runtime/repositories/`、`app/runtime/services/`       | 会话、Prompt、Trace、Feedback 等运行态数据的模型、仓储、服务                                |
-| Tool Center 基础设施                   | `app/tool_center/core/`                                                           | BaseTool、ToolResult、Evidence、ToolError、Trace、Registry                                  |
+| Tool Center 领域基础                 | `app/tool_center/`                                                                | Tool 执行契约、BaseTool、领域异常、Telemetry、Registry                               |
 | IOC Mock/Client 适配                   | `app/integrations/ioc/`                                                           | IOC Client 抽象、Mock Client、Mock 数据和业务数据 DTO                                       |
-| 业务 Query Tool                        | `app/tools/query/`                                                                | KPI、Alarm、Risk、WorkOrder 查询 Tool                                                       |
+| 业务 Tool 实现                       | `app/tools/`                                                                      | Query、Analysis、Action 三类 Tool                                                      |
 | Tool 注册入口                          | `app/tools/register.py`、`app/tool_center/registry.py`                            | 全局 Tool Registry 和批量注册函数                                                           |
+| Tool HTTP API                         | `app/tools/api.py`                                                                | 列出 Tool，并通过统一 `ApiResponse` 调用 Tool                                        |
+| Operation Graph 调用 Tool             | `app/operation_agent/nodes/query_operation_data_node.py`                          | Node 通过 Registry 调用 Query/Analysis Tool，沉淀 Evidence                             |
 | 测试入口                               | `tests/`                                                                          | API、Runtime、Tool Center、Mock IOC Client、Query Tool 测试                                 |
 
 ## 目录结构
@@ -83,11 +85,17 @@ backend/
 │   │   └── runtime_service.py  # Runtime Chat 主编排服务
 │   ├── schemas/                # 早期业务 API DTO：agent、cache、conversation、feedback、health、item、prompt
 │   ├── tool_center/
-│   │   ├── core/               # Tool SDK：BaseTool、DTO、异常、Trace、Registry
-│   │   └── registry.py         # 全局 Tool Registry 包装
+│   │   ├── contracts.py        # Tool 领域契约：Input、Result、Evidence、Error
+│   │   ├── base_tool.py        # Tool 统一执行模板
+│   │   ├── exceptions.py       # Tool 领域异常
+│   │   ├── telemetry.py        # Tool 耗时、状态、证据与脱敏日志
+│   │   └── registry.py         # Tool 注册、查找与进程级 Registry
 │   ├── tools/
 │   │   ├── query/              # KPI / Alarm / Risk / WorkOrder 查询 Tool
-│   │   └── register.py         # Query Tool 批量注册入口
+│   │   ├── analysis/           # IOC 确定性聚合与风险评分 Tool
+│   │   ├── action/             # 需人工确认的工单草稿 Tool
+│   │   ├── api.py              # Tool 列表与调用 API
+│   │   └── register.py         # 全部 Tool 集中装配入口
 │   ├── utils/                  # ID、SSE、时区等通用工具
 │   └── main.py                 # FastAPI 应用入口
 ├── alembic/
@@ -156,20 +164,25 @@ backend/
 
 ### Tool Center 与 IOC 适配
 
-| 文件/目录                             | 作用                                                                               |
-| ------------------------------------- | ---------------------------------------------------------------------------------- |
-| `app/tool_center/core/base_tool.py`   | Tool 统一执行入口，负责 trace_id、异常捕获、ToolResult 包装                        |
-| `app/tool_center/core/schemas.py`     | Tool 输入输出 DTO：ToolContext、BaseToolInput、Evidence、ToolError、ToolResult     |
-| `app/tool_center/core/exceptions.py`  | Tool 层异常类型和错误码                                                            |
-| `app/tool_center/core/trace.py`       | Tool 调用日志记录，记录耗时、状态、错误、证据数量                                  |
-| `app/tool_center/core/registry.py`    | Tool 注册中心，支持注册、获取、列出 Tool                                           |
-| `app/tool_center/registry.py`         | 全局 registry 实例，供 Graph/Node/API 统一获取 Tool                                |
-| `app/integrations/ioc/client.py`      | IOC API Client 抽象接口，后续真实 IOC Client 应按这里的签名实现                    |
-| `app/integrations/ioc/mock_client.py` | Mock IOC Client，支持 KPI、告警、隐患、工单查询和过滤                              |
-| `app/integrations/ioc/mock_data.py`   | 脱敏 Mock 业务数据                                                                 |
-| `app/integrations/ioc/schema.py`      | IOC Mock/API 返回 DTO 和业务记录 DTO                                               |
-| `app/tools/query/`                    | 查询类 Tool，当前包含 `kpi_query`、`alarm_query`、`risk_query`、`work_order_query` |
-| `app/tools/register.py`               | 批量注册当前查询类 Tool                                                            |
+| 文件/目录                                             | 作用                                                                                              |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `app/tool_center/contracts.py`                        | Tool 内部执行契约：`ToolContext`、`BaseToolInput`、`Evidence`、`ToolError`、`ToolResult`       |
+| `app/tool_center/base_tool.py`                        | Tool 统一 `run()` 执行入口，复用全局 trace id，集中处理异常、结果包装与 telemetry              |
+| `app/tool_center/exceptions.py`                       | Tool 领域异常、错误标识与 `retryable` 语义                                                     |
+| `app/tool_center/telemetry.py`                        | 复用全局 logger 记录 Tool 状态、耗时、证据数量和 metadata，并对输入摘要脱敏                   |
+| `app/tool_center/registry.py`                         | Tool 注册、获取、列出和进程级 registry，供 Graph/Node/API 统一使用                              |
+| `app/core/schema/response_schema.py`                  | Tool HTTP API 复用的全局 `ApiResponse`；与 Tool 内部 `ToolResult` 分层，不是同一契约                  |
+| `app/core/trace/trace_context.py`                     | HTTP 请求与 Tool 调用共享的全链路 trace context                                                    |
+| `app/integrations/ioc/client.py`                      | IOC API Client 抽象接口，后续真实 IOC Client 应按这里的签名实现                                   |
+| `app/integrations/ioc/mock_client.py`                 | Mock IOC Client，支持 KPI、告警、隐患、工单查询、过滤白名单和空数据语义                              |
+| `app/integrations/ioc/mock_data.py`                   | 脱敏 Mock 业务数据                                                                                |
+| `app/integrations/ioc/schema.py`                      | IOC API 响应契约和 KPI、Alarm、Risk、WorkOrder 业务记录 DTO                                      |
+| `app/tools/query/`                                    | 查询 Tool：`kpi_query`、`alarm_query`、`risk_query`、`work_order_query`                                    |
+| `app/tools/analysis/ioc_summary_tool.py`              | `ioc_summary_analysis`：确定性聚合统计与风险评分，不调用 LLM                                      |
+| `app/tools/action/work_order_draft_tool.py`           | `work_order_draft`：只生成工单草稿，返回 `requires_human_confirmation=true`                         |
+| `app/tools/register.py`                               | 使用共享 `MockIocApiClient` 集中注册当前 6 个 Tool                                              |
+| `app/tools/api.py`                                    | `GET /api/v1/tools` 与 `POST /api/v1/tools/call`，外层统一使用 `ApiResponse`                    |
+| `app/operation_agent/nodes/query_operation_data_node.py` | Operation Graph 通过 Registry 调用 Query/Analysis Tool，将结果、Evidence 和 Tool trace id 写入 State |
 
 ### 测试目录
 
@@ -179,7 +192,11 @@ backend/
 | `tests/integrations/test_mock_ioc_client.py`    | Mock IOC Client 数据与过滤测试                    |
 | `tests/tool_center/`                            | BaseTool、Tool Schema、Tool Registry 基础设施测试 |
 | `tests/tools/query/`                            | KPI、Alarm、Risk、WorkOrder Query Tool 单元测试   |
+| `tests/tools/analysis/`                         | IOC 汇总 Analysis Tool 单元测试                      |
+| `tests/tools/action/`                           | 工单草稿 Action Tool 单元测试                         |
 | `tests/tools/test_tool_registry_integration.py` | Tool Registry 集成注册测试                        |
+| `tests/tools/test_tool_center_integration.py`   | Query -> Analysis -> Action 全链路契约测试              |
+| `tests/tools/test_tools_api.py`                 | Tool 列表、查询、分析、动作与不存在 Tool 的 HTTP API 测试       |
 
 ## Navicat 创建数据库
 
@@ -319,6 +336,17 @@ http://localhost:8000/api/v1/openapi.json
 | GET    | `/api/v1/items/{id}`                      | 查询 Demo Item 详情        |
 | PUT    | `/api/v1/items/{id}`                      | 更新 Demo Item             |
 | DELETE | `/api/v1/items/{id}`                      | 删除 Demo Item             |
+| GET    | `/api/v1/tools`                           | 列出当前已注册 Tool       |
+| POST   | `/api/v1/tools/call`                      | 按名称调用 Tool，返回统一响应 |
+
+Tool 内部返回 `ToolResult`，HTTP 边界再使用全局 `ApiResponse` 包装：
+
+```text
+Graph / Node -> ToolResult(success, data, evidence, error, trace_id, metadata)
+HTTP API     -> ApiResponse(data=ToolResult)
+```
+
+`/api/v1/tools/call` 当前主要用于开发联调和契约验证；生产开放前还需补充身份认证、租户隔离、Tool 可见性、调用权限、限流和持久化审计。
 
 Runtime 持久化接口：
 
@@ -381,6 +409,18 @@ pytest
 curl http://localhost:8000/api/v1/health
 ```
 
+Tool Center 聚焦验证：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m compileall -q \
+  app/tool_center app/tools app/integrations/ioc
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/verify_tool_center.py
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest \
+  tests/tool_center tests/integrations tests/tools -q
+```
+
+2026-07-11 重构审核时的验证结果：Tool Center 验收脚本 `9/9`、聚焦测试 `146 passed`、全量后端测试 `340 passed`。
+
 SSE 联调示例：
 
 ```bash
@@ -390,6 +430,9 @@ curl -N "http://localhost:8000/api/v1/agent/stream?traceId=<trace_id>"
 ## 后续扩展建议
 
 - 逐步收敛旧的 `application/agent_service.py` 和 `runtime/in_memory_store.py`，让新流程优先走 Runtime 持久化链路。
-- 在 Graph/Node 层接入 `tool_center`，让业务数据访问统一通过 Tool Center。
-- 为 Tool Center 增加 Analysis Tool、Action Draft Tool 和 Graph Node 示例。
-- 增加统一鉴权、租户权限、Tool Trace 入库和更完整的结构化日志。
+- 将 `ToolException` 的字符串领域错误标识与 `AppException` 的整数业务码分开，避免覆盖父类 `code` 类型。
+- 保持 `app/core -> 业务领域` 的单向依赖边界，将 Tool 领域错误到 HTTP 错误的映射收敛到 API/Adapter 层。
+- 为 Tool Center 增加统一鉴权、租户权限、Tool 可见性、限流和参数白名单。
+- 将 Tool 调用记录为请求 trace 下的独立 span，持久化耗时、错误码、Evidence 摘要和 metadata。
+- 实现 `RealIocApiClient` 与环境化装配，并增加超时、重试、熔断和依赖健康检查。
+- 将 Action Draft 接入“前端展示 -> 人工确认 -> 后端二次校验 -> 真实执行 -> 审计”闭环。

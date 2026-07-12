@@ -21,6 +21,7 @@ from starlette.responses import StreamingResponse
 from app.analysis_stream.event_emitter import SseEventEmitter
 from app.core.context.context_holder import get_request_context, get_user_context
 from app.core.schema.response_schema import ApiResponse
+from app.operation_agent.analysis_basis import build_analysis_basis
 from app.operation_agent.schemas.request import OperationAnalyzeRequest
 from app.operation_agent.schemas.response import OperationAnalyzeResponse
 from app.operation_agent.service import analyze_operation
@@ -87,6 +88,7 @@ def operation_analyze(payload: OperationAnalyzeRequest) -> ApiResponse[Operation
         risk_items=risk,
         advice_items=advice,
         evidence=evidence,
+        analysis_basis=result.get("analysis_basis") or build_analysis_basis(result),
         errors=errors,
     )
 

@@ -36,7 +36,7 @@ function sendMessage() {
   const assistantMsg: ChatMessage = { role: 'assistant', content: '' }
   messages.value.push(assistantMsg)
 
-  const stream = streamRuntimeChat(
+  streamRuntimeChat(
     { message: text, conversation_id: conversationId.value, prompt_code: props.promptCode },
     {
       onStarted() {},
@@ -58,8 +58,6 @@ function sendMessage() {
       },
     },
   )
-
-  // 如果需要在组件卸载时取消，可保存 stream
 }
 </script>
 

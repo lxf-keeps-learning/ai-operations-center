@@ -20,4 +20,8 @@ class OperationAnalyzeResponse(BaseModel):
     risk_items: list[dict[str, Any]] = Field(default_factory=list, description="风险排序列表")
     advice_items: list[dict[str, Any]] = Field(default_factory=list, description="改进建议列表")
     evidence: list[dict[str, Any]] = Field(default_factory=list, description="数据来源证据链")
+    analysis_basis: dict[str, Any] = Field(
+        default_factory=dict,
+        description="分层分析依据：事实、假设、数据依据、知识依据和待核查项",
+    )
     errors: list[dict[str, Any]] = Field(default_factory=list, description="处理过程中的错误记录")

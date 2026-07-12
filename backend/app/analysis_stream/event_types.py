@@ -6,6 +6,7 @@ EVENT_NODE_STARTED = "node_started"
 EVENT_NODE_COMPLETED = "node_completed"
 EVENT_NODE_FAILED = "node_failed"
 EVENT_REPORT_COMPLETED = "report_completed"
+EVENT_REPORT_DELTA = "report_delta"
 EVENT_ANALYSIS_FAILED = "analysis_failed"
 EVENT_HEARTBEAT = "heartbeat"
 EVENT_STREAM_CLOSED = "stream_closed"
@@ -23,6 +24,7 @@ P0_EVENTS = {
     EVENT_NODE_COMPLETED,
     EVENT_NODE_FAILED,
     EVENT_REPORT_COMPLETED,
+    EVENT_REPORT_DELTA,
     EVENT_ANALYSIS_FAILED,
     EVENT_STREAM_CLOSED,
 }

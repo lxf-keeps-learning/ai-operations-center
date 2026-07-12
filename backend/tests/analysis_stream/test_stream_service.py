@@ -86,6 +86,26 @@ def test_report_completed_contains_total_duration():
     assert payload["total_duration_ms"] > 0
 
 
+def test_report_delta_reconstructs_completed_summary():
+    """报告增量拼接结果必须与最终权威 summary 完全一致。"""
+    request = OperationAnalyzeRequest(trigger_type="tab_analysis", domain="safety")
+    events = _collect_events(request, "test_report_delta_001")
+
+    deltas = [
+        event.get("payload", {}).get("delta", "")
+        for event in events
+        if event["event_type"] == "report_delta"
+    ]
+    report_event = next(
+        event for event in events if event["event_type"] == "report_completed"
+    )
+
+    assert len(deltas) > 1
+    assert "".join(deltas) == report_event["payload"]["summary"]
+    assert events.index(next(e for e in events if e["event_type"] == "report_delta")) \
+        < events.index(report_event)
+
+
 def test_stream_sequence_is_replayable():
     """事件应可按 sequence 完整回放。"""
     request = OperationAnalyzeRequest(trigger_type="tab_analysis", domain="business")
