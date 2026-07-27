@@ -12,11 +12,13 @@ from typing import AsyncGenerator
 
 from sqlalchemy.orm import Session
 
+from app.observability import build_langsmith_config
 from app.runtime.graph import runtime_graph
 from app.runtime.runtime_event_adapter import RuntimeEventAdapter
 from app.runtime.schemas.feedback_schema import FeedbackCreate
 from app.runtime.services.feedback_service import feedback_service
 from app.runtime.state import RuntimeGraphState
+from app.utils.ids import new_trace_id
 from app.utils.sse import to_sse
 
 
@@ -42,6 +44,7 @@ class RuntimeService:
 
         使用 runtime_graph.invoke() 编排，返回对话结果。
         """
+        trace_id = new_trace_id()
         state: RuntimeGraphState = {
             "db": db,
             "user_id": user_id,
@@ -49,9 +52,23 @@ class RuntimeService:
             "conversation_id": conversation_id,
             "biz_type": biz_type,
             "prompt_code": prompt_code,
+            "trace_id": trace_id,
         }
 
-        result = runtime_graph.invoke(state)
+        result = runtime_graph.invoke(
+            state,
+            config=build_langsmith_config(
+                trace_id=trace_id,
+                graph_name="ioc_runtime_chat_graph",
+                user_id=user_id,
+                conversation_id=conversation_id,
+                metadata={
+                    "biz_type": biz_type,
+                    "prompt_code": prompt_code,
+                    "streaming": False,
+                },
+            ),
+        )
 
         return {
             "conversation_id": result["conversation"].id,
@@ -75,6 +92,7 @@ class RuntimeService:
         通过 compiled_graph.astream() 驱动节点执行，LLM token 经
         get_stream_writer() → RuntimeEventAdapter → SSE 实时输出。
         """
+        trace_id = new_trace_id()
         initial_state: RuntimeGraphState = {
             "db": db,
             "user_id": user_id,
@@ -82,6 +100,7 @@ class RuntimeService:
             "conversation_id": conversation_id,
             "biz_type": biz_type,
             "prompt_code": prompt_code,
+            "trace_id": trace_id,
             "_streaming": True,
         }
 
@@ -91,6 +110,17 @@ class RuntimeService:
         try:
             async for mode, data in runtime_graph.astream(
                 initial_state,
+                config=build_langsmith_config(
+                    trace_id=trace_id,
+                    graph_name="ioc_runtime_chat_graph",
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    metadata={
+                        "biz_type": biz_type,
+                        "prompt_code": prompt_code,
+                        "streaming": True,
+                    },
+                ),
                 stream_mode=["values", "updates", "custom"],
             ):
                 for event_type, event_data in adapter.process(mode, data):

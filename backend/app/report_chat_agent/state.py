@@ -23,6 +23,8 @@ class ReportChatState(TypedDict, total=False):
     runtime_session_id: str
     user_id: str
     user_question: str
+    sensitive_data_detected: bool
+    credential_detected: bool
 
     scene: str
     report_context: dict[str, Any]
@@ -31,6 +33,9 @@ class ReportChatState(TypedDict, total=False):
     risk_items: list[dict[str, Any]]
     advice_items: list[dict[str, Any]]
     evidence: list[dict[str, Any]]
+    metrics: list[dict[str, Any]]
+    analysis_basis: dict[str, Any]
+    raw_data: dict[str, Any]
 
     chat_history: list[dict[str, Any]]
 

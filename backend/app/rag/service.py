@@ -10,7 +10,7 @@
 核心设计原则：
   1. 所有异常在 Service 层被吞掉并转为 RagSearchResponse(success=False)。
   2. Service 层不抛出任何异常，Graph Node 调用时无需 try/except。
-  3. 未配置 RAG_SEARCH_URL 时自动降级为 MockRagClient，保证演示/开发环境可感知 RAG 效果。
+  3. 未配置真实 RAG 时默认返回空结果；Mock 数据仅在显式开启时使用。
 """
 
 import logging
@@ -35,7 +35,8 @@ class RagService:
         Args:
             client: RAG HTTP 客户端。不传时自动选择：
                     - RAG_SEARCH_URL 已配置 → 真实 RagClient
-                    - RAG_SEARCH_URL 未配置 → MockRagClient（内置演示数据）
+                    - RAG_ALLOW_MOCK=true → MockRagClient（仅开发/测试）
+                    - 其他情况 → 禁用 RAG，返回空结果
                     测试时可通过 MockRagClient 注入。
         """
         if client is not None:
@@ -46,10 +47,13 @@ class RagService:
                 api_key=settings.rag_search_api_key,
                 timeout_seconds=settings.rag_search_timeout_seconds,
             )
-        else:
+        elif settings.rag_allow_mock:
             from app.rag.mock_client import MockRagClient
             self._client = MockRagClient()
-            logger.info("RAG_SEARCH_URL 未配置，使用 MockRagClient 返回演示数据。")
+            logger.warning("RAG_ALLOW_MOCK 已开启，当前使用内置演示知识库数据。")
+        else:
+            self._client = RagClient(base_url="")
+            logger.info("RAG_SEARCH_URL 未配置且 Mock 未开启，RAG 检索已禁用。")
 
     def retrieve(self, request: RagSearchRequest) -> RagSearchResponse:
         """执行 RAG 检索，统一处理调用异常和兜底。

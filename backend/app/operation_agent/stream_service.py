@@ -22,11 +22,13 @@ from app.analysis_stream.event_emitter import SseEventEmitter
 from app.analysis_stream.langgraph_event_adapter import LangGraphEventAdapter
 from app.analysis_stream.schemas import AnalysisStreamEvent
 from app.db.session import get_session_local
+from app.observability import build_langsmith_config
 from app.operation_agent.graph import NODE_METADATA, operation_graph
 from app.operation_agent.models.analysis_event_model import AnalysisEvent
 from app.operation_agent.schemas.request import OperationAnalyzeRequest
 from app.operation_agent.services.record_service import save_analysis_result
 from app.operation_agent.state import OperationState
+from app.security.content_moderator import ModerationAction, content_moderator
 from app.utils.ids import new_trace_id
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,11 @@ async def stream_operation_analysis(
     user_context: dict | None = None,
 ) -> AsyncGenerator[str, None]:
     """流式执行运营分析，由 compiled graph 驱动节点执行顺序。"""
+    moderation = content_moderator.moderate(request.user_question) if request.user_question else None
+    safe_user_question = (
+        getattr(moderation, "masked_text", None) or request.user_question
+        if moderation is not None else request.user_question
+    )
     page_context = {
         "domain": request.domain,
         "active_tab": request.active_tab,
@@ -63,13 +70,13 @@ async def stream_operation_analysis(
         "company_id": request.company_id,
         "project_id": request.project_id,
         "trigger_type": request.trigger_type,
-        "user_question": request.user_question,
+        "user_question": safe_user_question,
     }
 
     initial_state: OperationState = {
         "trace_id": emitter.run_id,
         "trigger_type": request.trigger_type,
-        "user_question": request.user_question,
+        "user_question": safe_user_question,
         "user_context": user_context or {},
         "page_context": page_context,
         "llm_usages": [],
@@ -89,6 +96,19 @@ async def stream_operation_analysis(
         ),
     )
 
+    if moderation and moderation.action in (ModerationAction.BLOCK, ModerationAction.ESCALATE):
+        yield _emit_event(
+            initial_state,
+            emitter,
+            emitter.create_analysis_failed(
+                message=moderation.message or "输入包含凭据或高风险敏感信息，已阻断分析。",
+                error_code="INPUT_SECURITY_BLOCKED",
+                error_message="输入未进入分析图、数据库或模型链路。",
+            ),
+        )
+        yield _emit_event(initial_state, emitter, emitter.create_stream_closed())
+        return
+
     adapter = LangGraphEventAdapter(emitter, NODE_METADATA, NODE_ORDER)
     current_node_key: str | None = None
     current_node_name: str | None = None
@@ -97,6 +117,18 @@ async def stream_operation_analysis(
         # ── compiled graph 是唯一执行源 ─────────────────
         async for mode, data in operation_graph.astream(
             initial_state,
+            config=build_langsmith_config(
+                trace_id=emitter.run_id,
+                graph_name="ioc_operation_analysis_graph",
+                user_id=(user_context or {}).get("user_id"),
+                metadata={
+                    "domain": request.domain,
+                    "trigger_type": request.trigger_type,
+                    "company_ref": request.company_id,
+                    "project_ref": request.project_id,
+                    "streaming": True,
+                },
+            ),
             stream_mode=["values", "updates", "custom"],
         ):
             if mode == "values":
@@ -167,11 +199,10 @@ async def stream_operation_analysis(
             db,
             trace_id=trace_id,
             page_context=page_context,
-            input_snapshot=(
-                {"message": request.user_question}
-                if request.user_question
-                else {}
-            ),
+            input_snapshot={
+                "message": initial_state.get("user_question", ""),
+                "raw_data": final_state.get("raw_data", {}),
+            } if initial_state.get("user_question") or final_state.get("raw_data") else {},
             result=final_state,
             status=status,
             error_message=error_msg,

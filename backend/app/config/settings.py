@@ -19,6 +19,32 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     redis_enabled: bool = False
     redis_url: str = "redis://localhost:6379/0"
+    langsmith_tracing: bool = Field(
+        default=False,
+        description="是否将 LangGraph/LangChain 执行链路上报到 LangSmith。",
+    )
+    langsmith_api_key: str = Field(
+        default="",
+        description="LangSmith API Key，仅从本地环境或密钥管理系统注入。",
+    )
+    langsmith_endpoint: str = Field(
+        default="https://api.smith.langchain.com",
+        description="LangSmith API 地址，可替换为企业私有化部署地址。",
+    )
+    langsmith_project: str = Field(
+        default="ioc-agent-local",
+        description="LangSmith Tracing Project 名称。",
+    )
+    langsmith_sampling_rate: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="LangSmith Trace 采样率，0 表示关闭采样，1 表示全量。",
+    )
+    langsmith_mask_inputs_outputs: bool = Field(
+        default=True,
+        description="发送到 LangSmith 前是否递归脱敏输入和输出。",
+    )
     operation_llm_timeout_seconds: float = Field(
         default=20.0,
         description="Operation Agent 调用 DeepSeek 生成报告片段的单次超时时间。",
@@ -34,6 +60,10 @@ class Settings(BaseSettings):
     rag_search_timeout_seconds: float = Field(
         default=15.0,
         description="RAG 检索请求超时秒数。",
+    )
+    rag_allow_mock: bool = Field(
+        default=False,
+        description="是否允许使用内置 Mock RAG。仅限开发和自动化测试环境显式开启。",
     )
 
     # Sprint6.1: RAG Decision & Query Rewrite Optimization.

@@ -7,9 +7,9 @@
 
 决策架构（四层）：
   Layer 1 — Hard Guardrail：强制拦截，LLM 不可覆盖。
-  Layer 2 — Rule Based：关键词匹配基线。
+  Layer 2 — Rule Based：强制调用规则 + 关键词匹配基线。
   Layer 3 — LLM Decision：配置开启时调用（rag_use_llm_decision=True）。
-  Layer 4 — Finalize：校验、置信度检查、fallback。
+  Layer 4 — Finalize：强制规则优先、校验、置信度检查、fallback。
 """
 
 import json
@@ -41,8 +41,41 @@ _INTENT_KEYWORD_GROUPS: list[tuple[list[str], str, list[str]]] = [
     ),
     (
         [
-            "处置", "整改", "流程", "怎么处理", "如何应对", "怎么办",
+            "怎么处理", "如何处理", "如何应对", "怎么办", "处置流程",
+            "整改流程", "怎么整改", "如何整改", "处置要求", "整改要求",
         ],
+        "process_lookup",
+        ["制度", "标准", "案例"],
+    ),
+]
+
+# 用户明确要求查询外部制度、法规、标准或历史案例时，属于业务上的
+# “必须补充知识库依据”。这组规则仍受 Hard Guardrail 约束，但不可被
+# LLM 的 need_rag=false 覆盖。这里刻意只保留明确复合表达，避免把
+# “当前报告如何判定”“有哪些整改项”等报告内问题误判成强制 RAG。
+_MANDATORY_RAG_KEYWORD_GROUPS: list[tuple[list[str], str, list[str]]] = [
+    (
+        [
+            "制度依据", "制度原文", "相关制度", "适用制度",
+            "法规依据", "法规原文", "相关法规", "适用法规",
+            "法律依据", "法律原文", "相关法律", "适用法律",
+            "标准依据", "标准原文", "相关标准", "适用标准",
+            "规范依据", "规范原文", "相关规范", "适用规范",
+            "判断规则", "判定规则",
+        ],
+        "policy_lookup",
+        ["制度", "标准"],
+    ),
+    (
+        [
+            "历史案例", "类似案例", "以往案例", "过往案例", "案例库",
+            "历史经验", "类似经验", "有没有先例",
+        ],
+        "case_lookup",
+        ["案例", "经验"],
+    ),
+    (
+        ["处置流程", "整改流程", "处置要求", "整改要求"],
         "process_lookup",
         ["制度", "标准", "案例"],
     ),
@@ -136,6 +169,16 @@ def _hard_guardrail_decision(state: ReportChatState) -> ReportChatState | None:
         state["required_anchors"] = []
         return state
 
+    if state.get("sensitive_data_detected"):
+        state["need_rag"] = False
+        state["rag_reason"] = "输入包含已脱敏的敏感数据，禁止查询外部知识库。"
+        state["rag_intent"] = "none"
+        state["rag_confidence"] = 1.0
+        state["rag_decision_source"] = "guardrail"
+        state["suggested_doc_types"] = []
+        state["required_anchors"] = []
+        return state
+
     if scope == "out_of_scope":
         state["need_rag"] = False
         state["rag_reason"] = "用户问题与当前报告无关，不需要查询知识库。"
@@ -172,7 +215,7 @@ def _hard_guardrail_decision(state: ReportChatState) -> ReportChatState | None:
 # ── Layer 2: Rule Based Decision ───────────────────────
 
 def _rule_based_decision(state: ReportChatState) -> dict:
-    """纯规则判断基线，始终返回有效决策。
+    """规则判断层，先识别强制调用规则，再计算普通规则基线。
 
     Returns:
         need_rag, reason, intent, confidence, suggested_doc_types, required_anchors.
@@ -183,6 +226,36 @@ def _rule_based_decision(state: ReportChatState) -> dict:
     evidence_refs = state.get("evidence_refs", [])
     has_report_evidence = bool(retrieved) or bool(evidence_refs)
     required_anchors = _extract_required_anchors(state)
+
+    if scope == "report_internal" and (
+        "不调用大模型" in question
+        or "当前规则" in question
+        or "本报告规则" in question
+        or "报告中的规则" in question
+    ):
+        return {
+            "need_rag": False,
+            "reason": "用户明确要求仅依据当前报告内规则，不调用外部知识库。",
+            "intent": "report_internal_scope",
+            "confidence": 1.0,
+            "suggested_doc_types": [],
+            "required_anchors": required_anchors,
+            "mandatory_rag": False,
+        }
+
+    # 明确的外部知识查询请求 → 强制调用 RAG，LLM 不可否决。
+    for keywords, intent, doc_types in _MANDATORY_RAG_KEYWORD_GROUPS:
+        for kw in keywords:
+            if kw in question:
+                return {
+                    "need_rag": True,
+                    "reason": f"用户明确要求查询'{kw}'，必须调用知识库补充可追溯依据。",
+                    "intent": intent,
+                    "confidence": 1.0,
+                    "suggested_doc_types": list(doc_types),
+                    "required_anchors": required_anchors,
+                    "mandatory_rag": True,
+                }
 
     # 关键词匹配 → 确定意图和文档类型。
     for keywords, intent, doc_types in _INTENT_KEYWORD_GROUPS:
@@ -195,6 +268,7 @@ def _rule_based_decision(state: ReportChatState) -> dict:
                     "confidence": 0.8,
                     "suggested_doc_types": list(doc_types),
                     "required_anchors": required_anchors,
+                    "mandatory_rag": False,
                 }
 
     # 实时状态、趋势、统计类问题优先交给 Tool Center，RAG 不负责查实时业务数据。
@@ -206,6 +280,7 @@ def _rule_based_decision(state: ReportChatState) -> dict:
             "confidence": 0.85,
             "suggested_doc_types": [],
             "required_anchors": required_anchors,
+            "mandatory_rag": False,
         }
 
     # report_related 扩展类问题。
@@ -217,6 +292,7 @@ def _rule_based_decision(state: ReportChatState) -> dict:
             "confidence": 0.7,
             "suggested_doc_types": ["制度", "标准", "案例"],
             "required_anchors": required_anchors,
+            "mandatory_rag": False,
         }
 
     # evidence 不足。
@@ -228,6 +304,7 @@ def _rule_based_decision(state: ReportChatState) -> dict:
             "confidence": 0.7,
             "suggested_doc_types": ["制度", "标准", "案例"],
             "required_anchors": required_anchors,
+            "mandatory_rag": False,
         }
 
     # 默认：报告内已有足够依据。
@@ -238,6 +315,7 @@ def _rule_based_decision(state: ReportChatState) -> dict:
         "confidence": 0.9,
         "suggested_doc_types": [],
         "required_anchors": required_anchors,
+        "mandatory_rag": False,
     }
 
 
@@ -378,10 +456,21 @@ def _finalize_decision(
     """融合规则判断与 LLM 判断，写入最终 State。
 
     优先级：
-      1. LLM 可用、输出合法、置信度达标 → 使用 LLM 决策（source=llm）。
-      2. LLM 未启用 → 使用规则决策（source=rule）。
-      3. LLM 启用但无法使用 → 使用规则决策（source=fallback）。
+      1. 强制调用规则命中 → 使用规则决策（source=mandatory_rule）。
+      2. LLM 可用、输出合法、置信度达标 → 使用 LLM 决策（source=llm）。
+      3. LLM 未启用 → 使用规则决策（source=rule）。
+      4. LLM 启用但无法使用 → 使用规则决策（source=fallback）。
     """
+    if rule_decision.get("mandatory_rag"):
+        state["need_rag"] = True
+        state["rag_reason"] = rule_decision["reason"]
+        state["rag_intent"] = rule_decision["intent"]
+        state["rag_confidence"] = rule_decision["confidence"]
+        state["rag_decision_source"] = "mandatory_rule"
+        state["suggested_doc_types"] = rule_decision["suggested_doc_types"]
+        state["required_anchors"] = rule_decision["required_anchors"]
+        return state
+
     if llm_decision is not None:
         llm_decision = _complete_llm_anchors(state, llm_decision)
 
@@ -447,9 +536,9 @@ def should_use_rag_node(state: ReportChatState) -> ReportChatState:
 
     Sprint6.1 升级为四层决策架构：
       1. Hard Guardrail — 强制拦截，LLM 不可覆盖。
-      2. Rule Based — 关键词匹配基线（始终计算）。
+      2. Rule Based — 强制调用规则 + 关键词匹配基线（始终计算）。
       3. LLM Decision — 配置开启时调用（rag_use_llm_decision=True）。
-      4. Finalize — 系统校验 + 置信度检查 + fallback。
+      4. Finalize — 强制规则优先 + 系统校验 + 置信度检查 + fallback。
 
     Args:
         state: 包含 question_scope、user_question 等的 State。
@@ -468,7 +557,7 @@ def should_use_rag_node(state: ReportChatState) -> ReportChatState:
     # Layer 3: LLM Decision（仅配置开启时）。
     llm_decision = None
     llm_attempted = False
-    if settings.rag_use_llm_decision:
+    if settings.rag_use_llm_decision and not rule_decision.get("mandatory_rag"):
         llm_attempted = True
         llm_decision = _llm_decision(state, rule_decision)
 

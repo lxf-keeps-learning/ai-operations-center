@@ -1,7 +1,11 @@
+import hashlib
+import json
+
 from sqlalchemy.orm import Session
 
 from app.operation_agent.models.analysis_record_model import OperationAnalysisRecord
 from app.operation_agent.repositories.analysis_record_repo import analysis_record_repo
+from app.operation_agent.services.record_service import normalize_report_evidence
 from app.report_chat_agent.state import ReportChatState
 
 
@@ -46,20 +50,37 @@ def load_report_context_node(state: ReportChatState, db: Session) -> ReportChatS
     risk_raw = record.risk_items_json or {}
     advice_raw = record.advice_items_json or {}
     evidence_raw = record.evidence_json or {}
+    metrics_raw = record.metrics_json or {}
+    input_snapshot = record.input_snapshot_json or {}
+
+    abnormal, risk, advice, evidence = normalize_report_evidence(
+        _extract_list(abnormal_raw, "items"),
+        _extract_list(risk_raw, "items"),
+        _extract_list(advice_raw, "items"),
+        _extract_list(evidence_raw, "items") or _extract_list(evidence_raw, "evidence"),
+    )
+    summary = record.summary_text or _summary_from_markdown(record.final_answer_markdown or "")
 
     state["report_context"] = {
         "title": record.report_name or "运营分析报告",
-        "summary": record.summary_text or "",
+        "summary": summary,
         "risk_level": _extract_risk_level(risk_raw),
         "created_at": record.created_at.isoformat() if record.created_at else "",
         "domain": domain,
     }
 
     state["report_sections"] = _split_sections(record.final_answer_markdown or "")
-    state["abnormal_items"] = _extract_list(abnormal_raw, "items")
-    state["risk_items"] = _extract_list(risk_raw, "items")
-    state["advice_items"] = _extract_list(advice_raw, "items")
-    state["evidence"] = _extract_list(evidence_raw, "items") or _extract_list(evidence_raw, "evidence")
+    state["abnormal_items"] = abnormal
+    state["risk_items"] = risk
+    state["advice_items"] = advice
+    state["evidence"] = evidence
+    state["metrics"] = _with_metric_refs(_extract_list(metrics_raw, "items"))
+    state["analysis_basis"] = (
+        evidence_raw.get("analysis_basis", {}) if isinstance(evidence_raw, dict) else {}
+    )
+    state["raw_data"] = (
+        input_snapshot.get("raw_data", {}) if isinstance(input_snapshot, dict) else {}
+    )
 
     state["errors"] = errors
     return state
@@ -77,6 +98,9 @@ def _has_preloaded_report_context(state: ReportChatState) -> bool:
         "risk_items",
         "advice_items",
         "evidence",
+        "metrics",
+        "analysis_basis",
+        "raw_data",
     )
     return any(bool(state.get(field, [])) for field in context_fields)
 
@@ -127,3 +151,25 @@ def _split_sections(markdown: str) -> list[dict]:
         sections.append(current)
 
     return sections
+
+
+def _summary_from_markdown(markdown: str) -> str:
+    for raw_line in markdown.splitlines():
+        line = raw_line.strip().lstrip("-*>").strip()
+        if not line or line.startswith("#") or line.startswith("|"):
+            continue
+        return line[:500]
+    return ""
+
+
+def _with_metric_refs(metrics: list[dict]) -> list[dict]:
+    output: list[dict] = []
+    for metric in metrics:
+        normalized = dict(metric)
+        if not normalized.get("evidence_id"):
+            identity = json.dumps(normalized, ensure_ascii=False, sort_keys=True, default=str)
+            normalized["evidence_id"] = (
+                f"METRIC-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:12]}"
+            )
+        output.append(normalized)
+    return output

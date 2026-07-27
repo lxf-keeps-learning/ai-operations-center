@@ -11,8 +11,9 @@ OperationService — 运营分析业务入口。
 """
 import logging
 
-from app.operation_agent.analysis_basis import build_analysis_basis
 from app.db.session import get_session_local
+from app.observability import build_langsmith_config
+from app.operation_agent.analysis_basis import build_analysis_basis
 from app.operation_agent.graph import operation_graph
 from app.operation_agent.schemas.request import OperationAnalyzeRequest
 from app.operation_agent.services.record_service import get_cached_result, save_analysis_result
@@ -34,6 +35,12 @@ def analyze_operation(
     先检查 30 分钟内相同 cache_key 是否有缓存结果，有则直接返回。
     没有则执行 Graph，完成后保存结果到数据库。
     """
+    user_q = request.user_question
+    moderation = content_moderator.moderate(user_q) if user_q else None
+    safe_user_q = (
+        getattr(moderation, "masked_text", None) or user_q
+        if moderation is not None else user_q
+    )
     page_context = {
         "domain": request.domain,
         "active_tab": request.active_tab,
@@ -42,8 +49,11 @@ def analyze_operation(
         "company_id": request.company_id,
         "project_id": request.project_id,
         "trigger_type": request.trigger_type,
-        "user_question": request.user_question,
+        "user_question": safe_user_q,
     }
+
+    if moderation and moderation.action in (ModerationAction.BLOCK, ModerationAction.ESCALATE):
+        return _blocked_result(trace_id, request, user_context, page_context, moderation.message)
 
     if not request.force_refresh:
         db = None
@@ -58,11 +68,7 @@ def analyze_operation(
             if db is not None:
                 db.close()
 
-    user_q = request.user_question
-    if user_q:
-        moderation = content_moderator.moderate(user_q)
-        if moderation.action in (ModerationAction.BLOCK, ModerationAction.ESCALATE):
-            return _blocked_result(trace_id, request, user_context, page_context, moderation.message)
+    user_q = safe_user_q
 
     initial_state: OperationState = {
         "trace_id": trace_id or new_trace_id(),
@@ -73,7 +79,21 @@ def analyze_operation(
         "llm_usages": [],
     }
 
-    result = operation_graph.invoke(initial_state)
+    result = operation_graph.invoke(
+        initial_state,
+        config=build_langsmith_config(
+            trace_id=initial_state["trace_id"],
+            graph_name="ioc_operation_analysis_graph",
+            user_id=(user_context or {}).get("user_id"),
+            metadata={
+                "domain": request.domain,
+                "trigger_type": request.trigger_type,
+                "company_ref": request.company_id,
+                "project_ref": request.project_id,
+                "streaming": False,
+            },
+        ),
+    )
     trace_id = result.get("trace_id", new_trace_id())
 
     errors = result.get("errors", [])
@@ -87,7 +107,10 @@ def analyze_operation(
             db2,
             trace_id=trace_id,
             page_context=page_context,
-            input_snapshot={"message": request.user_question} if request.user_question else {},
+            input_snapshot={
+                "message": user_q,
+                "raw_data": result.get("raw_data", {}),
+            } if user_q or result.get("raw_data") else {},
             result=result,
             status=status,
             error_message=error_msg,
@@ -113,7 +136,7 @@ def _blocked_result(
     return {
         "trace_id": trace_id or new_trace_id(),
         "trigger_type": request.trigger_type,
-        "user_question": request.user_question,
+        "user_question": page_context.get("user_question"),
         "user_context": user_context or {},
         "page_context": page_context,
         "raw_data": {},

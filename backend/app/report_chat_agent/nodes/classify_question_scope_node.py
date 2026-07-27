@@ -1,3 +1,5 @@
+import re
+
 from app.report_chat_agent.state import QuestionScope, ReportChatState
 
 _INTERNAL_KEYWORDS = [
@@ -27,6 +29,18 @@ _OUT_OF_SCOPE_KEYWORDS = [
     "音乐", "小说", "游戏", "明星", "足球", "篮球",
 ]
 
+_OUT_OF_SCOPE_PATTERNS = [
+    re.compile(r"(?:写|作|生成).{0,4}(?:一首|首).{0,10}(?:诗|歌)"),
+]
+_GLOBAL_PATTERNS = [
+    re.compile(r"(?:其他|所有|全部).{0,6}(?:历史)?报告"),
+    re.compile(r"(?:跨|多份|多篇).{0,4}报告"),
+]
+_INTERNAL_OVERRIDE_PATTERNS = [
+    re.compile(r"(?:当前|本报告|报告中).{0,4}(?:规则|判断逻辑|判定逻辑)"),
+    re.compile(r"不调用.{0,4}(?:大模型|llm|rag)"),
+]
+
 
 def classify_question_scope_node(state: ReportChatState) -> ReportChatState:
     question = state.get("user_question", "")
@@ -37,6 +51,13 @@ def classify_question_scope_node(state: ReportChatState) -> ReportChatState:
         return state
 
     q = question.strip().lower()
+
+    for pattern in _OUT_OF_SCOPE_PATTERNS:
+        if pattern.search(q):
+            state["question_scope"] = "out_of_scope"
+            state["scope_reason"] = "用户问题属于内容创作等非运营分析场景"
+            state["need_tool_query"] = False
+            return state
 
     for kw in _OUT_OF_SCOPE_KEYWORDS:
         if kw in q:
@@ -49,6 +70,20 @@ def classify_question_scope_node(state: ReportChatState) -> ReportChatState:
         if kw in q:
             state["question_scope"] = "ioc_global"
             state["scope_reason"] = f"用户问题包含全局关键词'{kw}'，判定为 IOC 全局问题"
+            state["need_tool_query"] = False
+            return state
+
+    for pattern in _GLOBAL_PATTERNS:
+        if pattern.search(q):
+            state["question_scope"] = "ioc_global"
+            state["scope_reason"] = "用户问题要求跨报告或全量历史报告分析"
+            state["need_tool_query"] = False
+            return state
+
+    for pattern in _INTERNAL_OVERRIDE_PATTERNS:
+        if pattern.search(q):
+            state["question_scope"] = "report_internal"
+            state["scope_reason"] = "用户明确询问当前报告内规则或本地规则结论"
             state["need_tool_query"] = False
             return state
 

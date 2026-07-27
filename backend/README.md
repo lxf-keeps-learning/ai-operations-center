@@ -12,6 +12,7 @@
 - SQLAlchemy 2
 - pymysql
 - Alembic
+- LangSmith（可选 Agent 可观测性）
 - Redis（当前本地开发默认不启用，后续部署预留）
 - REST + SSE
 
@@ -30,6 +31,7 @@
 | 统一响应结构                           | `app/schemas/common.py`、`app/core/schema/response_schema.py`                     | `ApiResponse`、业务响应包装、基础响应契约                                                   |
 | 统一异常与业务错误码                   | `app/core/exception/`                                                             | `AppException`、错误码定义、FastAPI 异常处理器                                              |
 | Trace / Request Context                | `app/core/middleware/trace_middleware.py`、`app/core/context/`、`app/core/trace/` | 请求链路 ID、上下文持有、Trace 透传                                                         |
+| LangSmith Agent Trace                  | `app/observability/langsmith_tracing.py`                                         | Graph/Node/LLM 执行树、脱敏、采样和 IOC traceId 关联                                        |
 | 日志初始化                             | `app/core/logging/logger.py`                                                      | 后端日志格式和日志级别初始化                                                                |
 | MySQL 连接和 Session 依赖              | `app/db/session.py`、`app/db/base.py`                                             | SQLAlchemy Engine、SessionLocal、FastAPI `get_db` 依赖                                      |
 | Redis 可选健康检查                     | `app/db/redis.py`、`app/api/routes/cache.py`                                      | Redis 本地默认非强依赖，仅用于 ping/预留缓存能力                                            |
@@ -237,6 +239,28 @@ DATABASE_URL=mysql+pymysql://ioc_user:ioc_password@localhost:3306/ioc_ai
 后端只从 `DATABASE_URL` 读取数据库连接。若你的 MySQL 用户、密码、端口不同，只需要改这一项。
 
 MySQL 是当前 Sprint0 必须跑通的主数据库，Demo CRUD 会直接读写 `system_items` 表。
+
+## 配置 LangSmith Agent 可观测性
+
+LangSmith 是可选的 Agent 分析通道，不替代 IOC 自有 `ai_trace` 业务审计。两套链路通过
+LangSmith Metadata 中的 `ioc_trace_id` 关联。
+
+在仅本机使用且已被 Git 忽略的 `backend/.env` 中配置：
+
+```text
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=<从 LangSmith 密钥管理页获取>
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+LANGSMITH_PROJECT=ioc-agent-local
+LANGSMITH_SAMPLING_RATE=1.0
+LANGSMITH_MASK_INPUTS_OUTPUTS=true
+```
+
+- `LANGSMITH_TRACING=false` 时不创建远程回调，IOC 本地 Trace 不受影响。
+- `LANGSMITH_SAMPLING_RATE` 取值为 `0.0`～`1.0`；生产环境建议按数据量降低采样率。
+- `LANGSMITH_MASK_INPUTS_OUTPUTS=true` 时，手机号、邮箱、凭据字段等会在发送前脱敏。
+- `user_id`、`session_id`、`conversation_id`、公司和项目标识只发送不可逆哈希引用。
+- 不要将真实 API Key 写入 `.env.example`、`.env.dev`、`.env.test` 或 `.env.prod`。
 
 ## 配置 Redis 预留项
 

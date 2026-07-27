@@ -17,6 +17,7 @@ Sprint6.1 新增测试重点（LLM 决策路径）：
   12. LLM confidence 过低时 fallback 到规则。
   13. LLM 缺业务锚点时 fallback 到规则。
   14. 默认配置 rag_use_llm_decision=False 时走规则。
+  15. 强制调用规则命中时，LLM need_rag=false 不可覆盖。
 """
 
 import json
@@ -147,6 +148,30 @@ class TestShouldUseRagNode:
         assert result["need_rag"] is False
         assert "足够依据" in result["rag_reason"]
 
+    def test_plain_rectification_word_with_report_evidence_skips_rag(self) -> None:
+        state = _base_state(
+            "当前报告有哪些待整改隐患？",
+            retrieved_context=[{"type": "advice_item", "content": "整改项"}],
+            evidence_refs=["EV-001"],
+        )
+        result = should_use_rag_node(state)
+        assert result["need_rag"] is False
+
+    def test_sensitive_input_is_guarded_from_rag(self) -> None:
+        state = _base_state("手机号[REDACTED:mobile]，请结合报告说明")
+        state["sensitive_data_detected"] = True
+        result = should_use_rag_node(state)
+        assert result["need_rag"] is False
+        assert result["rag_decision_source"] == "guardrail"
+
+    def test_explicit_local_rule_request_skips_rag(self) -> None:
+        state = _base_state(
+            "如果不调用大模型，当前规则能得出哪些结论？",
+            retrieved_context=[{"type": "report_section", "content": "规则结论"}],
+        )
+        result = should_use_rag_node(state)
+        assert result["need_rag"] is False
+
     def test_out_of_scope_skips_rag(self) -> None:
         """无关问题 → need_rag = False."""
         state = _base_state("帮我写首诗", scope="out_of_scope")
@@ -260,6 +285,70 @@ class TestShouldUseRagNodeLlmDecision:
         assert result["need_rag"] is False
         assert result["rag_decision_source"] == "guardrail"
 
+    def test_mandatory_rule_skips_llm_and_forces_rag(self, monkeypatch) -> None:
+        """明确查询制度依据时，强制规则优先，LLM 无权否决。"""
+        monkeypatch.setattr(
+            "app.report_chat_agent.nodes.should_use_rag_node.settings.rag_use_llm_decision",
+            True,
+        )
+
+        def _unexpected_llm_call(*args, **kwargs):
+            raise AssertionError("强制 RAG 规则命中后不应再调用 LLM decision")
+
+        monkeypatch.setattr(
+            "app.report_chat_agent.nodes.should_use_rag_node.llm_client.chat",
+            _unexpected_llm_call,
+        )
+        state = _base_state(
+            "请查询这个风险等级的制度依据",
+            retrieved_context=[{"type": "risk_item", "content": "高风险"}],
+            evidence_refs=["EV_001"],
+        )
+        result = should_use_rag_node(state)
+        assert result["need_rag"] is True
+        assert result["rag_decision_source"] == "mandatory_rule"
+        assert result["rag_intent"] == "policy_lookup"
+        assert result["rag_confidence"] == 1.0
+
+    def test_guardrail_still_overrides_mandatory_rule(self, monkeypatch) -> None:
+        """范围 Guardrail 的禁止优先级仍高于强制 RAG 规则。"""
+        monkeypatch.setattr(
+            "app.report_chat_agent.nodes.should_use_rag_node.settings.rag_use_llm_decision",
+            True,
+        )
+        state = _base_state("查询相关制度依据", scope="out_of_scope")
+        result = should_use_rag_node(state)
+        assert result["need_rag"] is False
+        assert result["rag_decision_source"] == "guardrail"
+
+    def test_non_mandatory_rule_can_still_be_refined_by_llm(self, monkeypatch) -> None:
+        """普通规则只是基线，合法高置信度 LLM 结果仍可覆盖。"""
+        monkeypatch.setattr(
+            "app.report_chat_agent.nodes.should_use_rag_node.settings.rag_use_llm_decision",
+            True,
+        )
+        monkeypatch.setattr(
+            "app.report_chat_agent.nodes.should_use_rag_node.llm_client.chat",
+            lambda *a, **kw: _mock_llm_result(
+                json.dumps({
+                    "need_rag": False,
+                    "intent": "report_internal_scope",
+                    "reason": "当前报告证据足以回答",
+                    "confidence": 0.9,
+                    "suggested_doc_types": [],
+                    "required_anchors": [],
+                }, ensure_ascii=False),
+            ),
+        )
+        state = _base_state(
+            "这个判断有什么依据？",
+            retrieved_context=[{"type": "risk_item", "content": "高风险"}],
+            evidence_refs=["EV_001"],
+        )
+        result = should_use_rag_node(state)
+        assert result["need_rag"] is False
+        assert result["rag_decision_source"] == "llm"
+
     # ── LLM 返回合法 JSON ─────────────────────────────
 
     def test_llm_valid_json_uses_llm_decision(self, monkeypatch) -> None:
@@ -281,7 +370,7 @@ class TestShouldUseRagNodeLlmDecision:
                 }, ensure_ascii=False),
             ),
         )
-        state = _base_state("这个判断有没有制度依据？")
+        state = _base_state("这个判断有什么依据？")
         result = should_use_rag_node(state)
         assert result["need_rag"] is True
         assert result["rag_decision_source"] == "llm"
@@ -331,7 +420,7 @@ class TestShouldUseRagNodeLlmDecision:
             "app.report_chat_agent.nodes.should_use_rag_node.llm_client.chat",
             lambda *a, **kw: _mock_llm_result("这不是 JSON 格式"),
         )
-        state = _base_state("这个判断有没有制度依据？")
+        state = _base_state("这个判断有什么依据？")
         result = should_use_rag_node(state)
         assert result["need_rag"] is True
         assert result["rag_decision_source"] == "fallback"
@@ -347,7 +436,7 @@ class TestShouldUseRagNodeLlmDecision:
             "app.report_chat_agent.nodes.should_use_rag_node.llm_client.chat",
             lambda *a, **kw: _mock_llm_result(""),
         )
-        state = _base_state("这个判断有没有制度依据？")
+        state = _base_state("这个判断有什么依据？")
         result = should_use_rag_node(state)
         assert result["need_rag"] is True
         assert result["rag_decision_source"] == "fallback"
@@ -362,7 +451,7 @@ class TestShouldUseRagNodeLlmDecision:
             "app.report_chat_agent.nodes.should_use_rag_node.llm_client.chat",
             lambda *a, **kw: _mock_llm_result("", success=False),
         )
-        state = _base_state("这个判断有没有制度依据？")
+        state = _base_state("这个判断有什么依据？")
         result = should_use_rag_node(state)
         assert result["need_rag"] is True
         assert result["rag_decision_source"] == "fallback"
@@ -388,7 +477,7 @@ class TestShouldUseRagNodeLlmDecision:
                 }, ensure_ascii=False),
             ),
         )
-        state = _base_state("这个判断有没有制度依据？")
+        state = _base_state("这个判断有什么依据？")
         result = should_use_rag_node(state)
         assert result["need_rag"] is True
         assert result["rag_decision_source"] == "fallback"
@@ -414,7 +503,7 @@ class TestShouldUseRagNodeLlmDecision:
                 }, ensure_ascii=False),
             ),
         )
-        state = _base_state("这个判断有没有制度依据？")
+        state = _base_state("这个判断有什么依据？")
         result = should_use_rag_node(state)
         assert result["need_rag"] is True
         assert result["rag_decision_source"] == "llm"
@@ -424,7 +513,7 @@ class TestShouldUseRagNodeLlmDecision:
 
     def test_default_config_uses_rule(self) -> None:
         """rag_use_llm_decision=False（默认）→ 走规则路径，source=rule。"""
-        state = _base_state("这个判断有没有制度依据？")
+        state = _base_state("这个判断有什么依据？")
         result = should_use_rag_node(state)
         assert result["need_rag"] is True
         assert result["rag_decision_source"] == "rule"

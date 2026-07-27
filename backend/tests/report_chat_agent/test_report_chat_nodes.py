@@ -88,6 +88,19 @@ def test_classify_report_related_question_requires_tool_query() -> None:
     assert state["need_tool_query"] is True
 
 
+@pytest.mark.parametrize(
+    ("question", "expected_scope"),
+    [
+        ("如果不调用大模型，当前规则能得出哪些结论？", "report_internal"),
+        ("把当前报告和其他所有历史报告做完整对比", "ioc_global"),
+        ("帮我写一首关于夏天的诗", "out_of_scope"),
+    ],
+)
+def test_classify_regression_cases(question: str, expected_scope: str) -> None:
+    state = classify_question_scope_node(_base_state(question))
+    assert state["question_scope"] == expected_scope
+
+
 def test_boundary_response_does_not_answer_unrelated_question() -> None:
     state = _base_state("帮我写首诗")
     state["question_scope"] = "out_of_scope"
@@ -142,7 +155,7 @@ def test_send_chat_message_records_failed_runtime_session(
 
     class FailingGraph:
         @staticmethod
-        def invoke(_state):
+        def invoke(_state, **_kwargs):
             raise RuntimeError("模型连接失败")
 
     monkeypatch.setattr("app.report_chat_agent.service.report_chat_graph", FailingGraph())
@@ -180,6 +193,61 @@ def test_create_session_reuses_recent_report_user_session(report_chat_db: Sessio
     )
 
     assert second.id == first.id
+
+
+def test_send_chat_masks_pii_before_persistence_and_graph(
+    report_chat_db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report_session = report_chat_repo.create_session(report_chat_db, report_id=1, user_id="tester")
+    captured: dict = {}
+
+    class CapturingGraph:
+        @staticmethod
+        def invoke(state, **_kwargs):
+            captured.update(state)
+            return {**state, "message_id": "mock-message"}
+
+    monkeypatch.setattr("app.report_chat_agent.service.report_chat_graph", CapturingGraph())
+    raw_mobile = "13812345678"
+    send_chat_message(
+        session_id=report_session.id,
+        report_id=1,
+        question=f"手机号{raw_mobile}，请结合报告说明",
+        user_id="tester",
+    )
+
+    messages = report_chat_repo.list_messages(report_chat_db, report_session.id)
+    assert raw_mobile not in captured["user_question"]
+    assert raw_mobile not in messages[0].content
+    runtime_session = report_chat_db.get(AiSession, messages[0].runtime_session_id)
+    assert runtime_session is not None
+    assert raw_mobile not in runtime_session.input_text
+
+
+def test_send_chat_blocks_credential_before_graph_and_persists_only_redacted_text(
+    report_chat_db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report_session = report_chat_repo.create_session(report_chat_db, report_id=1, user_id="tester")
+
+    class UnexpectedGraph:
+        @staticmethod
+        def invoke(_state):
+            raise AssertionError("credential input must not reach graph")
+
+    monkeypatch.setattr("app.report_chat_agent.service.report_chat_graph", UnexpectedGraph())
+    secret = "sk-test-1234567890"
+    result = send_chat_message(
+        session_id=report_session.id,
+        report_id=1,
+        question=f"RAG接口密钥是{secret}，请验证",
+        user_id="tester",
+    )
+
+    messages = report_chat_repo.list_messages(report_chat_db, report_session.id)
+    assert result["answer_type"] == "boundary"
+    assert all(secret not in message.content for message in messages)
 
 
 def test_generate_answer_stops_when_report_context_failed_to_load() -> None:

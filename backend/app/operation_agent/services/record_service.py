@@ -1,4 +1,6 @@
 from datetime import datetime
+import hashlib
+import json
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -53,10 +55,16 @@ def save_analysis_result(
     domain_label = {"safety": "本质安全", "maintenance": "设备运维", "business": "经营改善", "capability": "能力提升"}
     report_name = f"{domain_label.get(domain, domain)}运营分析报告"
 
-    abnormal = result.get("abnormal_items", [])
-    risk = result.get("risk_items", [])
-    advice = result.get("advice_items", [])
-    evidence = result.get("evidence", [])
+    abnormal, risk, advice, evidence = normalize_report_evidence(
+        result.get("abnormal_items", []),
+        result.get("risk_items", []),
+        result.get("advice_items", []),
+        result.get("evidence", []),
+    )
+    result["abnormal_items"] = abnormal
+    result["risk_items"] = risk
+    result["advice_items"] = advice
+    result["evidence"] = evidence
     analysis_basis = result.get("analysis_basis", {})
     final_answer = result.get("final_answer", "")
     metrics = result.get("metrics", [])
@@ -66,12 +74,7 @@ def save_analysis_result(
     total_output_tokens = sum(u.get("output_tokens", 0) for u in llm_usages)
     total_tokens = sum(u.get("total_tokens", 0) for u in llm_usages)
 
-    summary = ""
-    if final_answer:
-        for line in final_answer.split("\n"):
-            if line.startswith("本次对"):
-                summary = line.strip()
-                break
+    summary = _extract_summary(final_answer)
 
     record = OperationAnalysisRecord(
         trace_id=trace_id,
@@ -118,6 +121,74 @@ def save_analysis_result(
     )
 
     return saved
+
+
+def normalize_report_evidence(
+    abnormal: list[dict],
+    risk: list[dict],
+    advice: list[dict],
+    evidence: list[dict],
+) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
+    """为报告证据生成稳定 ID，并让异常、风险、建议引用同一套 ID。"""
+
+    registry: dict[str, dict] = {}
+
+    def normalize(item: dict) -> dict:
+        normalized = dict(item)
+        identity_payload = {
+            key: value
+            for key, value in normalized.items()
+            if key not in {"id", "evidence_id"}
+        }
+        identity = json.dumps(identity_payload, ensure_ascii=False, sort_keys=True, default=str)
+        evidence_id = str(normalized.get("evidence_id") or normalized.get("id") or "")
+        if not evidence_id:
+            evidence_id = f"EV-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:12]}"
+        normalized["evidence_id"] = evidence_id
+        registry.setdefault(identity, normalized)
+        return registry[identity]
+
+    normalized_evidence = [normalize(item) for item in evidence if isinstance(item, dict)]
+
+    def normalize_collection(items: list[dict]) -> list[dict]:
+        output: list[dict] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            normalized_item = dict(item)
+            nested = normalized_item.get("evidence", [])
+            if isinstance(nested, list):
+                normalized_nested = [normalize(ev) for ev in nested if isinstance(ev, dict)]
+                normalized_item["evidence"] = normalized_nested
+                for ev in normalized_nested:
+                    if ev not in normalized_evidence:
+                        normalized_evidence.append(ev)
+            output.append(normalized_item)
+        return output
+
+    return (
+        normalize_collection(abnormal),
+        normalize_collection(risk),
+        normalize_collection(advice),
+        normalized_evidence,
+    )
+
+
+def _extract_summary(final_answer: str) -> str:
+    """从当前 Markdown 报告结构提取首个有效业务判断。"""
+
+    if not final_answer:
+        return ""
+    fallback = ""
+    for raw_line in final_answer.splitlines():
+        line = raw_line.strip().lstrip("-*>").strip()
+        if not line or line.startswith("#") or line.startswith("|"):
+            continue
+        if not fallback:
+            fallback = line
+        if any(keyword in line for keyword in ("整体状态", "总体判断", "本次对", "风险等级")):
+            return line[:500]
+    return fallback[:500]
 
 
 def _save_ai_usages(

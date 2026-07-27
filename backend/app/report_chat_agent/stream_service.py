@@ -13,6 +13,7 @@ import logging
 from typing import AsyncGenerator
 
 from app.db.session import get_session_local
+from app.observability import build_langsmith_config
 from app.report_chat_agent.graph import report_chat_graph
 from app.report_chat_agent.report_chat_event_adapter import ReportChatEventAdapter
 from app.report_chat_agent.repositories import report_chat_repo
@@ -39,10 +40,13 @@ async def stream_chat_message(
         session = report_chat_repo.get_session(db, session_id)
         if session is None:
             raise ValueError(f"报告会话不存在: {session_id}")
+        moderation = content_moderator.moderate(question)
+        safe_question = getattr(moderation, "masked_text", None) or question
+        sensitive_types = getattr(moderation, "sensitive_types", [])
         runtime_session = report_chat_repo.begin_turn(
             db,
             session=session,
-            question=question,
+            question=safe_question,
             trace_id=trace_id,
         )
         runtime_session_id = runtime_session.id
@@ -56,7 +60,12 @@ async def stream_chat_message(
         "session_id": session_id,
         "runtime_session_id": runtime_session_id,
         "user_id": user_id,
-        "user_question": question,
+        "user_question": safe_question,
+        "sensitive_data_detected": bool(sensitive_types),
+        "credential_detected": (
+            moderation.action == ModerationAction.BLOCK
+            and bool(sensitive_types)
+        ),
         "scene": "essential_safety",
         "report_context": {},
         "report_sections": [],
@@ -64,6 +73,9 @@ async def stream_chat_message(
         "risk_items": [],
         "advice_items": [],
         "evidence": [],
+        "metrics": [],
+        "analysis_basis": {},
+        "raw_data": {},
         "chat_history": [],
         "question_scope": "report_internal",
         "scope_reason": "",
@@ -88,7 +100,6 @@ async def stream_chat_message(
     }
 
     # ── 安全检查 ──────────────────────────────────────────
-    moderation = content_moderator.moderate(question)
     if moderation.action in (ModerationAction.BLOCK, ModerationAction.ESCALATE):
         initial_state["final_answer"] = (
             moderation.message or "您的输入包含违规内容，已被系统拦截。"
@@ -131,6 +142,18 @@ async def stream_chat_message(
     try:
         async for mode, data in report_chat_graph.astream(
             initial_state,
+            config=build_langsmith_config(
+                trace_id=trace_id,
+                graph_name="ioc_report_chat_graph",
+                user_id=user_id,
+                session_id=session_id,
+                conversation_id=session.conversation_id,
+                metadata={
+                    "report_id": str(report_id),
+                    "scene": initial_state["scene"],
+                    "streaming": True,
+                },
+            ),
             stream_mode=["values", "updates", "custom"],
         ):
             for event_t, event_d in adapter.process(mode, data):

@@ -17,6 +17,7 @@ from pathlib import Path
 from langgraph.config import get_stream_writer
 
 from app.config.settings import settings
+from app.report_chat_agent.answer_grounding import grounding_fallback, validate_grounded_answer
 from app.report_chat_agent.state import ReportChatState
 from app.runtime.llm.client import LlmResult, llm_client
 from app.security.content_moderator import ModerationAction, content_moderator
@@ -90,7 +91,10 @@ def generate_report_answer_node(state: ReportChatState) -> ReportChatState:
         user_question=user_question,
         report_context=json.dumps(report_context, ensure_ascii=False, indent=2),
         retrieved_context=json.dumps(retrieved_context, ensure_ascii=False, indent=2),
-        evidence=json.dumps(evidence, ensure_ascii=False, indent=2),
+        evidence=json.dumps({
+            "evidence": evidence,
+            "analysis_basis": state.get("analysis_basis", {}),
+        }, ensure_ascii=False, indent=2),
         merged_context=json.dumps(merged_context, ensure_ascii=False, indent=2),
         rag_results=json.dumps(rag_results, ensure_ascii=False, indent=2),
         chat_history=json.dumps(chat_history[-4:], ensure_ascii=False, indent=2),
@@ -160,6 +164,16 @@ def generate_report_answer_node(state: ReportChatState) -> ReportChatState:
     state["llm_usages"] = llm_usages
     state["errors"] = errors
     state["evidence_refs"] = evidence_refs
+
+    grounding_issues = validate_grounded_answer(state.get("final_answer", ""), state)
+    if grounding_issues:
+        errors.append({
+            "node": "validate_answer_grounding",
+            "message": "；".join(grounding_issues),
+        })
+        state["final_answer"] = grounding_fallback(state)
+        state["answer_type"] = "insufficient_evidence"
+        state["errors"] = errors
 
     moderation = content_moderator.moderate_output(state.get("final_answer", ""))
     if moderation.action == ModerationAction.MASK and moderation.masked_text:

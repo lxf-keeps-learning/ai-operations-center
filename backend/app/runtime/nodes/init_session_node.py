@@ -73,7 +73,8 @@ def init_session_node(state: RuntimeGraphState) -> RuntimeGraphState:
     )
 
     # ── 生成追踪 ID 并记录全链路 Span ──
-    trace_id = new_trace_id()
+    # Service 可提前生成 trace_id，用于将 IOC 本地 Trace 与 LangSmith 根 Run 关联。
+    trace_id = state.get("trace_id") or new_trace_id()
 
     # runtime 层根 Span（整次请求的总入口）
     root_span_id = new_span_id()
