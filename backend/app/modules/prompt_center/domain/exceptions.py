@@ -18,6 +18,7 @@ PRODUCTION_DIRECT_READ = ErrorCode(code=400015, message="生产环境禁止直�
 NOT_APPROVED = ErrorCode(code=400016, message="版本未审核通过", http_status=400, description="只有审核通过的版本才能发布")
 VERSION_ALREADY_RELEASED = ErrorCode(code=400017, message="版本已发布", http_status=400, description="该版本已发布到目标环境")
 CANNOT_PUBLISH_DRAFT = ErrorCode(code=400018, message="草稿不可发布", http_status=400, description="草稿必须先提交审核")
+PROMPT_SYNC_FAILED = ErrorCode(code=502010, message="Prompt 同步失败", http_status=502, description="LangSmith Prompt Hub 同步失败")
 
 
 def prompt_not_found(prompt_id: int | str) -> AppException:
@@ -37,3 +38,7 @@ def invalid_status_transition(current: str, target: str) -> AppException:
         INVALID_STATUS_TRANSITION,
         message=f"不允许从 {current} 状态流转到 {target} 状态",
     )
+
+
+def prompt_sync_failed(message: str = "LangSmith Prompt 同步失败") -> AppException:
+    return AppException.from_error_code(PROMPT_SYNC_FAILED, message=message)

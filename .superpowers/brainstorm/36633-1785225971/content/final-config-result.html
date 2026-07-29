@@ -1,0 +1,100 @@
+<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">
+  <div style="display:flex;align-items:center;justify-content:space-between;background:#fff;border-bottom:1px solid #e2e8f0;padding:14px 20px">
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="background:#0f172a;color:#fff;border-radius:7px;padding:8px 10px;font-weight:800">IOC</div>
+      <strong>智能运营中心</strong>
+    </div>
+    <div style="font-size:12px;color:#64748b">基础设施　/　<strong style="color:#2563eb">配置中心</strong></div>
+  </div>
+
+  <div style="padding:22px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <h2 style="margin-bottom:4px">配置中心</h2>
+        <p class="subtitle">统一管理运行环境、模型和 Agent Prompt</p>
+      </div>
+      <div style="padding:7px 11px;border-radius:999px;background:#ecfdf5;color:#047857;font-size:12px">
+        LangSmith 已连接 · ioc-agent-local
+      </div>
+    </div>
+
+    <div style="display:flex;gap:24px;border-bottom:1px solid #cbd5e1;margin:18px 0 20px">
+      <span style="padding:10px 2px;color:#64748b">运行环境</span>
+      <span style="padding:10px 2px;color:#64748b">模型配置</span>
+      <strong style="padding:10px 2px;color:#2563eb;border-bottom:3px solid #2563eb">Prompt 配置</strong>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px">
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <div style="font-size:11px;color:#64748b">真实 Prompt</div><strong style="font-size:22px">5</strong>
+      </div>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <div style="font-size:11px;color:#64748b">生产版本</div><strong style="font-size:22px">5</strong>
+      </div>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <div style="font-size:11px;color:#64748b">今日调用</div><strong style="font-size:22px">126</strong>
+      </div>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <div style="font-size:11px;color:#64748b">同步异常</div><strong style="font-size:22px;color:#15803d">0</strong>
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:12px">
+      <div style="display:flex;gap:8px">
+        <input class="mock-input" value="" placeholder="搜索名称 / Prompt Key" style="width:230px">
+        <button class="mock-button">全部场景</button>
+        <button class="mock-button">全部状态</button>
+      </div>
+      <div style="font-size:12px;color:#64748b;padding-top:8px">当前角色：运营人员</div>
+    </div>
+
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:9px;overflow:hidden;font-size:12px">
+      <div style="display:grid;grid-template-columns:2.2fr 1.1fr .7fr .9fr .8fr 1.2fr;gap:8px;background:#f1f5f9;padding:10px 12px;font-weight:700;color:#475569">
+        <span>Prompt</span><span>Graph / 节点</span><span>版本</span><span>状态</span><span>今日调用</span><span>操作</span>
+      </div>
+
+      <div style="display:grid;grid-template-columns:2.2fr 1.1fr .7fr .9fr .8fr 1.2fr;gap:8px;padding:12px;border-top:1px solid #f1f5f9;align-items:center">
+        <span><strong>运营分析—原因分析</strong><br><code>operation.analyze_reason</code></span>
+        <span>Operation<br>analyze_reason</span><span>v1.0.0</span>
+        <span style="color:#15803d">● 已发布</span><span>32</span>
+        <span style="color:#2563eb">查看　创建草稿　测试</span>
+      </div>
+      <div style="display:grid;grid-template-columns:2.2fr 1.1fr .7fr .9fr .8fr 1.2fr;gap:8px;padding:12px;border-top:1px solid #f1f5f9;align-items:center;background:#f8fbff">
+        <span><strong>运营分析—建议生成</strong><br><code>operation.generate_advice</code></span>
+        <span>Operation<br>generate_advice</span><span>v1.2.0</span>
+        <span style="color:#b45309">● 草稿待测试</span><span>28</span>
+        <span style="color:#2563eb">继续编辑　运行测试　提交审核</span>
+      </div>
+      <div style="display:grid;grid-template-columns:2.2fr 1.1fr .7fr .9fr .8fr 1.2fr;gap:8px;padding:12px;border-top:1px solid #f1f5f9;align-items:center">
+        <span><strong>报告问答—RAG 决策</strong><br><code>report_chat.rag_decision</code></span>
+        <span>Report Chat<br>should_use_rag</span><span>v1.0.0</span>
+        <span style="color:#15803d">● 已发布</span><span>24</span>
+        <span style="color:#2563eb">查看　创建草稿　测试</span>
+      </div>
+      <div style="display:grid;grid-template-columns:2.2fr 1.1fr .7fr .9fr .8fr 1.2fr;gap:8px;padding:12px;border-top:1px solid #f1f5f9;align-items:center">
+        <span><strong>报告问答—Query Rewrite</strong><br><code>report_chat.query_rewrite</code></span>
+        <span>Report Chat<br>build_rag_query</span><span>v1.0.0</span>
+        <span style="color:#15803d">● 已发布</span><span>19</span>
+        <span style="color:#2563eb">查看　创建草稿　测试</span>
+      </div>
+      <div style="display:grid;grid-template-columns:2.2fr 1.1fr .7fr .9fr .8fr 1.2fr;gap:8px;padding:12px;border-top:1px solid #f1f5f9;align-items:center">
+        <span><strong>报告问答—答案生成</strong><br><code>report_chat.generate_answer</code></span>
+        <span>Report Chat<br>generate_answer</span><span>v1.0.0</span>
+        <span style="color:#15803d">● 已发布</span><span>23</span>
+        <span style="color:#2563eb">查看　创建草稿　测试</span>
+      </div>
+    </div>
+
+    <div style="margin-top:14px;padding:11px;border-radius:8px;background:#eff6ff;color:#1e40af;font-size:12px">
+      运营人员看不到 System Prompt、模型参数、发布和回滚按钮；提交审核后由管理员完成发布。
+    </div>
+  </div>
+</div>
+
+<div class="option" data-choice="result-ui-approved" onclick="toggleSelect(this)" style="margin-top:18px">
+  <div class="letter">✓</div>
+  <div class="content">
+    <h3>这个结果页可以作为一期目标</h3>
+    <p>确认后进入设计文档与实施计划，不再增加实验中心等外围功能。</p>
+  </div>
+</div>

@@ -74,6 +74,7 @@ VERSION_LOCKED_PC = ErrorCode(code=400012, message="版本已锁定无法编辑"
 NOT_APPROVED_PC = ErrorCode(code=400016, message="版本未审核通过", http_status=400, description="只有审核通过的版本才能发布")
 INVALID_STATUS_TRANSITION = ErrorCode(code=400014, message="状态流转无效", http_status=400, description="当前状态不允许执行此操作")
 CANNOT_EDIT_PROTECTED = ErrorCode(code=403010, message="不可编辑受保护字段", http_status=403, description="运营人员不能修改系统层 Prompt")
+PROMPT_SYNC_FAILED = ErrorCode(code=502010, message="Prompt 同步失败", http_status=502, description="LangSmith Prompt Hub 同步失败")
 
 # ── Evaluation Center 错误码 (404020-404029, 400020-400029, 500020-500029) ──
 EVALUATION_NOT_FOUND = ErrorCode(code=404020, message="评估结果不存在", http_status=404, description="指定的评估记录不存在")
@@ -125,6 +126,7 @@ ALL_CODES: list[ErrorCode] = [
     NOT_APPROVED_PC,
     INVALID_STATUS_TRANSITION,
     CANNOT_EDIT_PROTECTED,
+    PROMPT_SYNC_FAILED,
     EVALUATION_NOT_FOUND,
     EVALUATION_RESULT_FAILED,
     INVALID_EVALUATOR,

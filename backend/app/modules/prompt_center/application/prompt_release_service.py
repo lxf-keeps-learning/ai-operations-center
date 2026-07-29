@@ -24,6 +24,9 @@ from app.modules.prompt_center.schemas.release_schema import (
     ReleaseResponse,
     RollbackRequest,
 )
+from app.modules.prompt_center.application.prompt_sync_service import (
+    ensure_prompt_version_synced,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +59,8 @@ def _release(
             if version.status not in (PromptStatus.APPROVED.value, PromptStatus.GRAY.value):
                 raise NOT_APPROVED
 
+    ensure_prompt_version_synced(db, prompt, version)
+
     prompt_release_repo.deactivate_env(db, prompt_id, data.environment)
 
     release_record = prompt_release_repo.create(db, {
@@ -85,6 +90,8 @@ def _release(
             "environment": data.environment,
             "release_type": data.release_type,
             "version": version.version,
+            "langsmith_commit_hash": version.langsmith_commit_hash,
+            "langsmith_tag": version.langsmith_tag,
         },
         "operator_id": data.released_by,
     })

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.modules.prompt_center.domain.entities import PromptRenderResult
 from app.modules.prompt_center.domain.enums import Environment
+from app.modules.prompt_center.domain.prompt_content import build_business_content
 from app.modules.prompt_center.domain.exceptions import (
     prompt_not_found,
     variable_missing,
@@ -71,7 +72,7 @@ def render_prompt(
     _check_template_variables(version_record, var_values)
 
     system_content = version_record.system_content or ""
-    business_parts = _build_business_content(version_record)
+    business_parts = build_business_content(version_record)
     runtime_context = _build_runtime_context(prompt_vars, var_values)
     messages = _build_messages(
         system_content=system_content,
@@ -116,7 +117,7 @@ def preview_prompt(
     _check_template_variables(version_record, var_values)
 
     system_content = version_record.system_content or ""
-    business_parts = _build_business_content(version_record)
+    business_parts = build_business_content(version_record)
     runtime_context = _build_runtime_context(prompt_vars, var_values)
     messages = _build_messages(
         system_content=system_content,
@@ -206,41 +207,6 @@ def _check_template_variables(version_record: PromptVersion, var_values: dict[st
         for match in _TEMPLATE_VAR_PATTERN.findall(field):
             if match not in var_values and match != "business_rules" and match != "positive_examples" and match != "negative_examples":
                 logger.warning("模板变量 %s 未提供值", match)
-
-
-def _build_business_content(version: PromptVersion) -> str:
-    parts: list[str] = []
-    if version.business_role_content:
-        parts.append(version.business_role_content)
-    if version.business_goal_content:
-        parts.append(version.business_goal_content)
-    if version.business_rules:
-        rules = version.business_rules
-        if isinstance(rules, list):
-            parts.append("## 业务规则")
-            for i, rule in enumerate(rules, 1):
-                if isinstance(rule, dict):
-                    if rule.get("enabled", True):
-                        parts.append(f"{i}. {rule.get('content', '')}")
-                else:
-                    parts.append(f"{i}. {rule}")
-    if version.output_requirement:
-        parts.append(version.output_requirement)
-    if version.positive_examples:
-        parts.append("## 正例")
-        for ex in version.positive_examples:
-            if isinstance(ex, dict):
-                parts.append(f"- {ex.get('content', '')}")
-            else:
-                parts.append(f"- {ex}")
-    if version.negative_examples:
-        parts.append("## 反例")
-        for ex in version.negative_examples:
-            if isinstance(ex, dict):
-                parts.append(f"- {ex.get('content', '')}")
-            else:
-                parts.append(f"- {ex}")
-    return "\n\n".join(parts)
 
 
 def _build_runtime_context(prompt_vars: list, var_values: dict[str, Any]) -> str:

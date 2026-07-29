@@ -1,0 +1,65 @@
+<h2>Prompt 配置如何融合到现有配置中心？</h2>
+<p class="subtitle">两种方案都移除顶部独立的“Prompt 管理 / 质量评估 / 实验中心 / 失败案例”入口，一期只保留配置中心内的 Prompt 闭环。</p>
+
+<div class="cards">
+  <div class="card" data-choice="config-tabs" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px">
+      <div class="mockup">
+        <div class="mockup-header">基础设施 / 配置中心</div>
+        <div class="mockup-body">
+          <div style="display:flex;gap:22px;border-bottom:1px solid #dbe4ee;padding-bottom:10px;margin-bottom:14px">
+            <span style="color:#64748b">运行环境</span>
+            <strong style="color:#2563eb;border-bottom:2px solid #2563eb;padding-bottom:10px">Prompt 配置</strong>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <div>
+              <strong>Prompt 配置</strong>
+              <div style="font-size:11px;color:#64748b">编辑、测试、提交审核与运行观测</div>
+            </div>
+            <button class="mock-button">新建草稿</button>
+          </div>
+          <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px;padding:9px;background:#f1f5f9;font-size:11px">
+            <strong>名称</strong><strong>场景</strong><strong>版本</strong><strong>状态</strong>
+            <span>运营建议生成</span><span>运营分析</span><span>v1.3</span><span style="color:#15803d">已发布</span>
+            <span>报告问答</span><span>报告助手</span><span>v1.1</span><span style="color:#b45309">草稿</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A · 配置中心页签（推荐）</h3>
+      <p>保留 `/infra/config`，增加“Prompt 配置”页签；编辑、测试、发布和指标使用嵌套子路由。入口统一，改动最小。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="config-cards" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px">
+      <div class="mockup">
+        <div class="mockup-header">基础设施 / 配置中心</div>
+        <div class="mockup-body">
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">
+            <div style="border:1px solid #dbe4ee;border-radius:8px;padding:16px">
+              <strong>运行环境</strong>
+              <p style="font-size:11px;color:#64748b">应用、版本、时区和默认模型</p>
+              <button class="mock-button">查看配置</button>
+            </div>
+            <div style="border:1px solid #93c5fd;border-radius:8px;padding:16px;background:#eff6ff">
+              <strong>Prompt 配置</strong>
+              <p style="font-size:11px;color:#64748b">可视化编辑、测试、发布和观测</p>
+              <button class="mock-button">进入管理</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B · 配置中心入口卡片</h3>
+      <p>配置中心作为目录页，再进入独立 Prompt 子页面。页面更宽松，但多一次跳转，和原有配置展示融合较弱。</p>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:22px">
+  <h3>一期统一导航</h3>
+  <p>顶部仅保留“基础设施 → 配置中心”。Prompt 相关路由统一收敛到 <code>/infra/config/prompts</code>；运营人员看不到系统字段和 LangSmith 密钥，管理员看到发布、回滚及连接状态，但密钥仍只保存在后端环境变量中。</p>
+</div>

@@ -23,6 +23,10 @@ class Settings(BaseSettings):
         default=False,
         description="是否将 LangGraph/LangChain 执行链路上报到 LangSmith。",
     )
+    langsmith_prompt_sync_enabled: bool = Field(
+        default=False,
+        description="是否在 Prompt 灰度或正式发布前同步到 LangSmith Prompt Hub。",
+    )
     langsmith_api_key: str = Field(
         default="",
         description="LangSmith API Key，仅从本地环境或密钥管理系统注入。",
