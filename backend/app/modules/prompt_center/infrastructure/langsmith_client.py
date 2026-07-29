@@ -20,7 +20,7 @@ class LangSmithPromptClientError(RuntimeError):
 class PromptSyncResult:
     commit_hash: str
     tag: str
-    url: str
+    url: str | None
 
 
 class LangSmithPromptClient:
@@ -109,12 +109,6 @@ class LangSmithPromptClient:
         if not _COMMIT_HASH_PATTERN.fullmatch(commit_hash):
             raise LangSmithPromptClientError("LangSmith 返回 URL 无法解析 Commit Hash")
         return commit_hash
-
-    def get_commit_url(self, commit_hash: str | None) -> str | None:
-        if not commit_hash:
-            return None
-        return f"{settings.langsmith_endpoint}/commits/{commit_hash}"
-
 
 def _escape_literal_braces(value: str) -> str:
     return value.replace("{", "{{").replace("}", "}}")

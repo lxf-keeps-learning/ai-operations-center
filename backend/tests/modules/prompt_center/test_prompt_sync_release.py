@@ -23,6 +23,10 @@ from app.modules.prompt_center.infrastructure.models import (
     PromptRelease,
     PromptVersion,
 )
+from app.modules.prompt_center.infrastructure.repositories import (
+    PromptVersionRepo,
+    prompt_version_repo,
+)
 from app.modules.prompt_center.schemas.prompt_schema import PromptCreate
 from app.modules.prompt_center.schemas.release_schema import ReleaseRequest, RollbackRequest
 from app.modules.prompt_center.schemas.version_schema import VersionCreate
@@ -42,11 +46,6 @@ class FakePromptClient:
             tag=version.version,
             url=f"https://smith.langchain.com/prompts/{prompt.prompt_key}/commit123",
         )
-
-    @staticmethod
-    def get_commit_url(commit_hash: str) -> str:
-        return f"https://smith.langchain.com/commits/{commit_hash}"
-
 
 @pytest.fixture
 def db() -> Iterator[Session]:
@@ -126,6 +125,87 @@ def test_first_sync_persists_commit_and_second_sync_reuses_it(db, monkeypatch):
     persisted = db.get(PromptVersion, version.id)
     assert persisted.langsmith_commit_hash == "commit100"
     assert persisted.langsmith_tag == "1.0.0"
+
+
+def test_sync_locks_version_row_before_reusing_commit(db, monkeypatch):
+    prompt, version = _create_approved_version(db)
+    prompt_version_repo.update(
+        db,
+        version.id,
+        {
+            "langsmith_commit_hash": "existing1",
+            "langsmith_tag": version.version,
+        },
+    )
+    lock_calls: list[int] = []
+
+    def get_by_id_for_update(session, version_id):
+        lock_calls.append(version_id)
+        return session.get(PromptVersion, version_id)
+
+    monkeypatch.setattr(
+        prompt_sync_service.prompt_version_repo,
+        "get_by_id_for_update",
+        get_by_id_for_update,
+        raising=False,
+    )
+    monkeypatch.setattr(settings, "langsmith_prompt_sync_enabled", True)
+    monkeypatch.setattr(settings, "langsmith_api_key", "test-key")
+    monkeypatch.setattr(prompt_sync_service, "langsmith_prompt_client", FakePromptClient())
+
+    result = prompt_sync_service.ensure_prompt_version_synced(db, prompt, version)
+
+    assert lock_calls == [version.id]
+    assert result.commit_hash == "existing1"
+
+
+def test_version_repo_requests_for_update_lock():
+    captured: dict[str, object] = {}
+    expected = object()
+
+    class FakeSession:
+        def scalar(self, statement):
+            captured["statement"] = statement
+            return expected
+
+    result = PromptVersionRepo().get_by_id_for_update(FakeSession(), 7)
+
+    assert result is expected
+    assert captured["statement"]._for_update_arg is not None
+
+
+def test_existing_commit_without_tag_is_backfilled_and_audited(db, monkeypatch):
+    prompt, version = _create_approved_version(db)
+    prompt_version_repo.update(
+        db,
+        version.id,
+        {
+            "langsmith_commit_hash": "legacy01",
+            "langsmith_tag": None,
+        },
+    )
+    fake = FakePromptClient()
+    monkeypatch.setattr(settings, "langsmith_prompt_sync_enabled", True)
+    monkeypatch.setattr(settings, "langsmith_api_key", "test-key")
+    monkeypatch.setattr(prompt_sync_service, "langsmith_prompt_client", fake)
+
+    prompt_release_service.production_release(
+        db,
+        prompt.id,
+        version.id,
+        ReleaseRequest(environment="production", released_by="publisher"),
+    )
+
+    persisted = db.get(PromptVersion, version.id)
+    assert persisted.langsmith_tag == version.version
+    audit = db.scalar(
+        select(PromptAuditLog)
+        .where(PromptAuditLog.action == "publish")
+        .order_by(PromptAuditLog.id.desc())
+    )
+    assert audit.after_data["langsmith_commit_hash"] == "legacy01"
+    assert audit.after_data["langsmith_tag"] == version.version
+    assert fake.calls == []
 
 
 def test_gray_then_production_release_syncs_once_and_audits_commit(db, monkeypatch):

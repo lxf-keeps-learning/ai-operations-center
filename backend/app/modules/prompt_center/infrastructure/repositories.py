@@ -99,6 +99,15 @@ class PromptVersionRepo:
     def get_by_id(self, db: Session, version_id: int) -> PromptVersion | None:
         return db.get(PromptVersion, version_id)
 
+    def get_by_id_for_update(self, db: Session, version_id: int) -> PromptVersion | None:
+        stmt = (
+            select(PromptVersion)
+            .where(PromptVersion.id == version_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return db.scalar(stmt)
+
     def get_by_prompt(self, db: Session, prompt_id: int) -> list[PromptVersion]:
         stmt = (
             select(PromptVersion)

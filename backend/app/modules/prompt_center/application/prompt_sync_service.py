@@ -18,15 +18,24 @@ def ensure_prompt_version_synced(
     if not settings.langsmith_prompt_sync_enabled:
         return None
 
-    persisted_version = prompt_version_repo.get_by_id(db, version.id)
+    persisted_version = prompt_version_repo.get_by_id_for_update(db, version.id)
     if persisted_version is None:
         raise prompt_sync_failed("Prompt 版本不存在，无法同步")
 
     if persisted_version.langsmith_commit_hash:
+        tag = persisted_version.langsmith_tag or persisted_version.version
+        if not persisted_version.langsmith_tag:
+            updated = prompt_version_repo.update(
+                db,
+                persisted_version.id,
+                {"langsmith_tag": tag},
+            )
+            if updated is None or updated.langsmith_tag != tag:
+                raise prompt_sync_failed("LangSmith Prompt Commit Tag 保存失败")
         return PromptSyncResult(
             commit_hash=persisted_version.langsmith_commit_hash,
-            tag=persisted_version.langsmith_tag or persisted_version.version,
-            url=langsmith_prompt_client.get_commit_url(persisted_version.langsmith_commit_hash) or "",
+            tag=tag,
+            url=None,
         )
 
     try:

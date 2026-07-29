@@ -7,6 +7,8 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 dist/
+.superpowers/
+frontend/pnpm-lock.yaml
 
 # Sprint 设计文档，不上传 Git
 docs/sprints/
