@@ -451,12 +451,26 @@ SSE 联调示例：
 curl -N "http://localhost:8000/api/v1/agent/stream?traceId=<trace_id>"
 ```
 
+## LangSmith Agent 可观测
+
+生产环境通过环境变量或密钥管理系统启用线上上报，不要把 API Key 写入仓库：
+
+```env
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=lsv2_...
+LANGSMITH_PROJECT=ioc-agent-prod
+LANGSMITH_SAMPLING_RATE=1.0
+LANGSMITH_MASK_INPUTS_OUTPUTS=true
+```
+
+运营分析、报告追问和 Runtime 会上报 Graph 根链路；LangGraph 节点、ChatOpenAI 模型调用、Tool Center 和 RAG 检索会形成可关联的子 Run。每次运行通过 `ioc_trace_id` 与本地 `ai_trace` 关联。详见 [LangSmith 线上观测运行手册](../docs/observability/langsmith-runbook.md)。
+
 ## 后续扩展建议
 
 - 逐步收敛旧的 `application/agent_service.py` 和 `runtime/in_memory_store.py`，让新流程优先走 Runtime 持久化链路。
 - 将 `ToolException` 的字符串领域错误标识与 `AppException` 的整数业务码分开，避免覆盖父类 `code` 类型。
 - 保持 `app/core -> 业务领域` 的单向依赖边界，将 Tool 领域错误到 HTTP 错误的映射收敛到 API/Adapter 层。
 - 为 Tool Center 增加统一鉴权、租户权限、Tool 可见性、限流和参数白名单。
-- 将 Tool 调用记录为请求 trace 下的独立 span，持久化耗时、错误码、Evidence 摘要和 metadata。
+- 继续完善 Tool 子 Run 的输入输出摘要、Evidence 评估和生产告警规则。
 - 实现 `RealIocApiClient` 与环境化装配，并增加超时、重试、熔断和依赖健康检查。
 - 将 Action Draft 接入“前端展示 -> 人工确认 -> 后端二次校验 -> 真实执行 -> 审计”闭环。

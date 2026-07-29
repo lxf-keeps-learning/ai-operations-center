@@ -11,6 +11,7 @@ from typing import Any
 
 from app.core.logging.logger import get_logger
 from app.core.trace.trace_context import get_trace_id
+from app.observability.langsmith_runs import run_observed
 from app.tool_center.contracts import BaseToolInput, Evidence, ToolError, ToolResult
 from app.tool_center.exceptions import ToolException
 from app.tool_center.telemetry import record_tool_trace
@@ -53,7 +54,15 @@ class BaseTool(ABC):
 
         start_time = time.perf_counter()
         try:
-            data, evidence, metadata = self._unpack_execution_result(self._execute(safe_input))
+            execution = run_observed(
+                self.name,
+                "tool",
+                lambda: self._execute(safe_input),
+                inputs=input_summary,
+                metadata={"tool_name": self.name},
+                trace_id=trace_id,
+            )
+            data, evidence, metadata = self._unpack_execution_result(execution)
             duration_ms = max(1, int((time.perf_counter() - start_time) * 1000))
             result = ToolResult(
                 success=True,

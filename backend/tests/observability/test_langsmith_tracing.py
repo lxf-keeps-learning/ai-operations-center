@@ -49,6 +49,14 @@ def test_disabled_tracing_returns_metadata_without_callbacks(monkeypatch) -> Non
     assert config["metadata"]["company_ref"] != "company_001"
 
 
+def test_langsmith_status_explains_missing_api_key(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "langsmith_tracing", True)
+    monkeypatch.setattr(settings, "langsmith_api_key", "")
+    enabled, reason = langsmith_tracing.langsmith_status()
+    assert enabled is False
+    assert reason == "missing_api_key"
+
+
 def test_enabled_tracing_adds_langsmith_callback(monkeypatch) -> None:
     class _FakeClient:
         pass

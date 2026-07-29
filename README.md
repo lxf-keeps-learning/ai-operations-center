@@ -11,6 +11,7 @@
 - Report Chat Graph：报告内追问、范围判断、证据检索和消息持久化。
 - RAG Decision、Query Rewrite、外部 RAG 调用与真实依据展示。
 - Graph 节点级 SSE Streaming、失败状态展示和事件审计。
+- LangSmith Agent 可观测：运营分析、报告追问和 Runtime Graph 支持根 Trace；Tool/RAG 调用支持脱敏子 Run，并通过 `ioc_trace_id` 与本地审计链路关联。
 
 ```text
 Vue 3 工作台
@@ -113,3 +114,7 @@ npm run build
 - 当前身份上下文用于 Trace、数据过滤和审计基础，生产级认证授权仍应由网关和权限系统补齐。
 
 更详细的后端、前端说明分别见 [backend/README.md](backend/README.md) 和 [frontend/README.md](frontend/README.md)。
+
+### LangSmith 线上观测
+
+线上部署时通过密钥管理系统注入 `LANGSMITH_API_KEY`，并设置 `LANGSMITH_TRACING=true`、`LANGSMITH_PROJECT`。完整配置、可观测范围和排查方法见 [LangSmith 线上观测运行手册](docs/observability/langsmith-runbook.md)。

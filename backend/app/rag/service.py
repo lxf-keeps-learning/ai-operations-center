@@ -16,6 +16,7 @@
 import logging
 
 from app.config.settings import settings
+from app.observability.langsmith_runs import run_observed
 from app.rag.client import RagClient
 from app.rag.schemas import RagSearchRequest, RagSearchResponse
 
@@ -70,7 +71,18 @@ class RagService:
                 success=False + error    — 调用失败，CallRagNode 应写 errors 并降级。
         """
         try:
-            return self._client.search(request)
+            return run_observed(
+                "rag_search",
+                "retriever",
+                lambda: self._client.search(request),
+                inputs={
+                    "query": request.query,
+                    "scene": request.scene,
+                    "top_k": request.top_k,
+                    "filters": request.filters.model_dump(exclude_none=True),
+                },
+                metadata={"rag_operation": "retrieve"},
+            )
         except Exception as e:
             logger.exception("RAG 检索发生未知异常: %s", e)
             return RagSearchResponse(

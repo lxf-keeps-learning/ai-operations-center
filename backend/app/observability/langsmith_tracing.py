@@ -62,6 +62,17 @@ def sanitize_trace_payload(value: Any) -> Any:
     return value
 
 
+def langsmith_status() -> tuple[bool, str]:
+    """Return effective availability and a safe diagnostic reason."""
+    if not settings.langsmith_tracing:
+        return False, "disabled_by_config"
+    if not settings.langsmith_api_key:
+        return False, "missing_api_key"
+    if settings.langsmith_sampling_rate <= 0:
+        return False, "sampling_rate_zero"
+    return True, "enabled"
+
+
 def stable_reference(value: object | None) -> str | None:
     """将用户、会话和租户标识转换为不可逆且可关联的短引用。"""
     if value in (None, ""):
@@ -72,11 +83,9 @@ def stable_reference(value: object | None) -> str | None:
 
 @lru_cache(maxsize=1)
 def _get_client() -> Client | None:
-    if (
-        not settings.langsmith_tracing
-        or not settings.langsmith_api_key
-        or settings.langsmith_sampling_rate <= 0
-    ):
+    enabled, reason = langsmith_status()
+    if not enabled:
+        logger.info("LangSmith tracing is not active: %s", reason)
         return None
 
     payload_transform = (

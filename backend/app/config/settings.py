@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     redis_enabled: bool = False
     redis_url: str = "redis://localhost:6379/0"
     langsmith_tracing: bool = Field(
-        default=False,
-        description="是否将 LangGraph/LangChain 执行链路上报到 LangSmith。",
+        default=True,
+        description="是否将 LangGraph/LangChain 执行链路上报到 LangSmith；仍需 API Key 才会生效。",
     )
     langsmith_api_key: str = Field(
         default="",
