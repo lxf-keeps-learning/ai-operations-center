@@ -22,6 +22,7 @@ from app.analysis_stream.event_emitter import SseEventEmitter
 from app.analysis_stream.langgraph_event_adapter import LangGraphEventAdapter
 from app.analysis_stream.schemas import AnalysisStreamEvent
 from app.db.session import get_session_local
+from app.modules.prompt_center.application.langgraph_integration import get_prompt_metadata
 from app.observability import build_langsmith_config
 from app.operation_agent.graph import NODE_METADATA, operation_graph
 from app.operation_agent.models.analysis_event_model import AnalysisEvent
@@ -113,6 +114,11 @@ async def stream_operation_analysis(
     current_node_key: str | None = None
     current_node_name: str | None = None
 
+    prompt_metadata = get_prompt_metadata(
+        prompt_key="ioc.safety.analysis",
+        environment="production",
+    )
+
     try:
         # ── compiled graph 是唯一执行源 ─────────────────
         async for mode, data in operation_graph.astream(
@@ -127,6 +133,7 @@ async def stream_operation_analysis(
                     "company_ref": request.company_id,
                     "project_ref": request.project_id,
                     "streaming": True,
+                    **prompt_metadata,
                 },
             ),
             stream_mode=["values", "updates", "custom"],

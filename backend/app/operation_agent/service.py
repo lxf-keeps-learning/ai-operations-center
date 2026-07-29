@@ -12,6 +12,7 @@ OperationService — 运营分析业务入口。
 import logging
 
 from app.db.session import get_session_local
+from app.modules.prompt_center.application.langgraph_integration import get_prompt_metadata
 from app.observability import build_langsmith_config
 from app.operation_agent.analysis_basis import build_analysis_basis
 from app.operation_agent.graph import operation_graph
@@ -79,6 +80,10 @@ def analyze_operation(
         "llm_usages": [],
     }
 
+    prompt_metadata = get_prompt_metadata(
+        prompt_key="ioc.safety.analysis",
+        environment="production",
+    )
     result = operation_graph.invoke(
         initial_state,
         config=build_langsmith_config(
@@ -91,6 +96,7 @@ def analyze_operation(
                 "company_ref": request.company_id,
                 "project_ref": request.project_id,
                 "streaming": False,
+                **prompt_metadata,
             },
         ),
     )

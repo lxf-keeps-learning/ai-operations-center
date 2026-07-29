@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 
 from app.config.settings import settings
+from app.modules.prompt_center.application.langgraph_integration import get_rendered_prompt
 from app.operation_agent.state import OperationState
 from app.runtime.llm.client import LlmResult, llm_client
 from app.security.content_moderator import ModerationAction, content_moderator
@@ -38,14 +39,42 @@ def analyze_reason_node(state: OperationState) -> OperationState:
         return state
 
     template = _load_prompt("operation_analysis.md") or "分析以下异常: {abnormal_items}"
-    system = _load_prompt("system_prompt.md")
-
-    prompt = template.format(
+    fallback_system = _load_prompt("system_prompt.md")
+    fallback_user = template.format(
         page_context=json.dumps(page_ctx, ensure_ascii=False, indent=2),
         metrics=json.dumps(metrics, ensure_ascii=False, indent=2),
         abnormal_items=json.dumps(abnormal, ensure_ascii=False, indent=2),
         evidence=json.dumps(evidence, ensure_ascii=False, indent=2),
     )
+    rendered_prompt = get_rendered_prompt(
+        prompt_key="ioc.safety.analysis",
+        environment="production",
+        variables={
+            "device_name": page_ctx.get("active_tab") or page_ctx.get("domain") or "IOC 运营对象",
+            "realtime_data": {
+                "metrics": metrics,
+                "abnormal_items": abnormal,
+                "evidence": evidence,
+            },
+            "history_data": state.get("raw_data", {}),
+            "alarm_data": state.get("raw_data", {}).get("alarm", []),
+        },
+        user_question="请分析当前异常指标的可能原因，并说明数据依据与待核查事项。",
+        fallback_messages=[
+            {"role": "system", "content": fallback_system},
+            {"role": "user", "content": fallback_user},
+        ],
+    )
+    system = _message_content(rendered_prompt.messages, "system")
+    prompt = _message_content(rendered_prompt.messages, "user")
+
+    prompt_facts: dict[str, dict] = state.setdefault("prompt_facts", {})
+    prompt_facts["analyze_reason"] = {
+        "prompt_key": rendered_prompt.prompt_key,
+        "prompt_version": rendered_prompt.version,
+        "prompt_commit_hash": rendered_prompt.langsmith_commit_hash,
+        "prompt_environment": rendered_prompt.environment,
+    }
 
     llm_usages: list[dict] = state.get("llm_usages", [])
 
@@ -63,6 +92,9 @@ def analyze_reason_node(state: OperationState) -> OperationState:
             "total_tokens": result.total_tokens,
             "success": 1 if result.success else 0,
             "error_message": result.error_message if not result.success else None,
+            "prompt_key": rendered_prompt.prompt_key,
+            "prompt_version": rendered_prompt.version,
+            "prompt_commit_hash": rendered_prompt.langsmith_commit_hash,
         })
         if result.success and result.content.strip():
             state["reason_analysis"] = result.content
@@ -85,6 +117,9 @@ def analyze_reason_node(state: OperationState) -> OperationState:
             "total_tokens": 0,
             "success": 0,
             "error_message": str(e),
+            "prompt_key": rendered_prompt.prompt_key,
+            "prompt_version": rendered_prompt.version,
+            "prompt_commit_hash": rendered_prompt.langsmith_commit_hash,
         })
         errors.append({"node": "analyze_reason", "message": f"LLM 调用异常: {e}"})
         state["reason_analysis"] = _fallback_reason(abnormal, metrics, evidence, str(e))
@@ -99,6 +134,13 @@ def analyze_reason_node(state: OperationState) -> OperationState:
         state["reason_analysis"] = "原因分析内容已被安全策略过滤。"
 
     return state
+
+
+def _message_content(messages: list[dict], role: str) -> str:
+    for message in messages:
+        if message.get("role") == role:
+            return str(message.get("content") or "")
+    return ""
 
 
 def _fallback_reason(
