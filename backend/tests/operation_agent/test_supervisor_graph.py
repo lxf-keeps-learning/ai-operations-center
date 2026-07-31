@@ -1,3 +1,5 @@
+import pytest
+
 from app.operation_agent.graph import build_operation_graph, operation_graph
 from app.operation_agent.multi_agent.graph import (
     NODE_METADATA,
@@ -6,6 +8,22 @@ from app.operation_agent.multi_agent.graph import (
     supervisor_graph,
 )
 from app.operation_agent.nodes.init_context_node import init_context_node
+
+
+def _stub_expensive_parent_nodes(monkeypatch):
+    for name in (
+        "query_operation_data_node",
+        "detect_abnormal_node",
+        "summary_node",
+    ):
+        monkeypatch.setattr(
+            f"app.operation_agent.multi_agent.graph.{name}",
+            lambda state: state,
+        )
+    monkeypatch.setattr(
+        "app.operation_agent.multi_agent.graph.run_domain_agent",
+        lambda state, _spec: state,
+    )
 
 
 def test_supervisor_runs_common_steps_once_and_routes_business_agent(monkeypatch):
@@ -33,6 +51,44 @@ def test_supervisor_runs_common_steps_once_and_routes_business_agent(monkeypatch
     assert calls.count("summary_node") == 1
     assert calls.count("agent:business") == 1
     assert result["supervisor_route"] == "business"
+
+
+@pytest.mark.parametrize("domain", (None, "unknown"))
+def test_supervisor_falls_back_to_safety_and_preserves_routing_error(monkeypatch, domain):
+    _stub_expensive_parent_nodes(monkeypatch)
+    state = {"errors": []}
+    if domain is not None:
+        state["domain"] = domain
+
+    result = build_supervisor_graph().invoke(state)
+
+    assert result["supervisor_route"] == "safety"
+    assert result["errors"] == [
+        {
+            "node": "supervisor",
+            "message": f"暂不支持的领域: {domain}，已回退到 safety。",
+        }
+    ]
+
+
+def test_supervisor_routes_once_before_dispatching_domain_agent(monkeypatch):
+    _stub_expensive_parent_nodes(monkeypatch)
+    route_calls = []
+
+    def route_once(state):
+        route_calls.append(state.get("domain"))
+        state["supervisor_route"] = "business"
+        return "business"
+
+    monkeypatch.setattr(
+        "app.operation_agent.multi_agent.graph.route_domain_agent",
+        route_once,
+    )
+
+    result = build_supervisor_graph().invoke({"domain": "business", "errors": []})
+
+    assert result["supervisor_route"] == "business"
+    assert route_calls == ["business"]
 
 
 def test_init_context_preserves_existing_errors_and_selected_route():

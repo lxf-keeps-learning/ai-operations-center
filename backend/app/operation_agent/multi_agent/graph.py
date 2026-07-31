@@ -31,7 +31,6 @@ def _route_supervisor_node(state: OperationState) -> OperationState:
 def _dispatch_domain_agent_node(state: OperationState) -> OperationState:
     """Run the configured domain agent for the Supervisor-selected route."""
 
-    route_domain_agent(state)
     spec = DOMAIN_AGENT_SPECS[state["supervisor_route"]]
     return run_domain_agent(state, spec)
 
