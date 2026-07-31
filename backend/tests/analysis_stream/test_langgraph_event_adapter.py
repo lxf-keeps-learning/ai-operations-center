@@ -41,12 +41,26 @@ def test_adapter_exposes_agent_key_on_node_started():
 
     events = adapter.process("custom", {
         "kind": "node_started",
+        "node_key": "dispatch_domain_agent",
+        "agent_key": "maintenance",
+    })
+
+    assert events[0]["node_key"] == "dispatch_domain_agent"
+    assert events[0]["payload"]["agent_key"] == "maintenance"
+
+
+def test_adapter_ignores_unknown_runtime_node_with_agent_key():
+    """Routing metadata must not expose an unregistered runtime node."""
+    emitter = _make_emitter()
+    adapter = LangGraphEventAdapter(emitter, NODE_METADATA, NODE_ORDER)
+
+    events = adapter.process("custom", {
+        "kind": "node_started",
         "node_key": "maintenance_agent",
         "agent_key": "maintenance",
     })
 
-    assert events[0]["node_key"] == "maintenance_agent"
-    assert events[0]["payload"]["agent_key"] == "maintenance"
+    assert events == []
 
 
 def test_adapter_exposes_agent_key_on_node_completed_from_state_update():

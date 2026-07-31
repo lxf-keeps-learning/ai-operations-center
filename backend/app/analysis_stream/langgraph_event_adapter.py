@@ -169,13 +169,9 @@ class LangGraphEventAdapter:
             return []
         node_key = data.get("node_key", "")
         agent_payload = _agent_payload(data)
-        is_domain_agent = (
-            agent_payload is not None
-            and node_key == f"{agent_payload['agent_key']}_agent"
-        )
         if (
             not node_key
-            or (node_key not in self._node_metadata and not is_domain_agent)
+            or node_key not in self._node_metadata
             or node_key in self._started_nodes
             or node_key in self._completed_nodes
         ):
