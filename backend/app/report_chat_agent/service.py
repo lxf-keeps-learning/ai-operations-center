@@ -1,6 +1,7 @@
 from app.db.session import get_session_local
 from app.observability import build_langsmith_config
 from app.report_chat_agent.graph import report_chat_graph
+from app.report_chat_agent.persistence import prepare_sync_report_chat_graph
 from app.report_chat_agent.repositories import report_chat_repo
 from app.report_chat_agent.state import ReportChatState
 from app.security.content_moderator import ModerationAction, content_moderator
@@ -122,7 +123,6 @@ def send_chat_message(
         "metrics": [],
         "analysis_basis": {},
         "raw_data": {},
-        "chat_history": [],
         "question_scope": "report_internal",
         "scope_reason": "",
         "retrieved_context": [],
@@ -171,20 +171,23 @@ def send_chat_message(
         return initial_state
 
     try:
-        result = report_chat_graph.invoke(
+        graph = prepare_sync_report_chat_graph(report_chat_graph)
+        graph_config = build_langsmith_config(
+            trace_id=current_trace_id,
+            graph_name="ioc_report_chat_graph",
+            user_id=user_id,
+            session_id=session_id,
+            conversation_id=session.conversation_id,
+            metadata={
+                "report_id": str(report_id),
+                "scene": initial_state["scene"],
+                "streaming": False,
+            },
+        )
+        graph_config["configurable"] = {"thread_id": session_id}
+        result = graph.invoke(
             initial_state,
-            config=build_langsmith_config(
-                trace_id=current_trace_id,
-                graph_name="ioc_report_chat_graph",
-                user_id=user_id,
-                session_id=session_id,
-                conversation_id=session.conversation_id,
-                metadata={
-                    "report_id": str(report_id),
-                    "scene": initial_state["scene"],
-                    "streaming": False,
-                },
-            ),
+            config=graph_config,
         )
     except Exception as exc:
         failed_db = get_session_local()()

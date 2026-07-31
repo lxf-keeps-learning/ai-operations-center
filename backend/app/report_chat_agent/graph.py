@@ -16,9 +16,12 @@ Sprint6 新增 RAG 分支：
   - 无关问题和 IOC 全局问题仍然走 boundary_response，不调用 RAG。
 """
 from collections.abc import Callable
+from typing import Any
 
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.store.base import BaseStore
 
 from app.report_chat_agent.nodes.boundary_response_node import boundary_response_node
 from app.report_chat_agent.nodes.build_rag_query_node import build_rag_query_node
@@ -29,10 +32,12 @@ from app.report_chat_agent.nodes.merge_context_node import merge_context_node
 from app.report_chat_agent.nodes.persist_chat_message_node import persist_chat_message_node
 from app.report_chat_agent.nodes.retrieve_report_evidence_node import retrieve_report_evidence_node
 from app.report_chat_agent.nodes.should_use_rag_node import should_use_rag_node
+from app.report_chat_agent.memory import load_chat_memory_node, save_chat_memory_node
+from app.report_chat_agent.persistence import get_report_chat_persistence
 from app.report_chat_agent.state import ReportChatState
 
 
-ReportChatNode = Callable[[ReportChatState], ReportChatState]
+ReportChatNode = Callable[..., ReportChatState]
 
 NODE_METADATA: dict[str, dict[str, str]] = {
     "load_report_context": {
@@ -94,7 +99,7 @@ def _with_stream_events(
     node_func: ReportChatNode,
 ) -> ReportChatNode:
     """包装节点函数，在节点入口发射 node_started 自定义事件。"""
-    def wrapped(state: ReportChatState) -> ReportChatState:
+    def wrapped(state: ReportChatState, runtime: Any = None) -> ReportChatState:
         try:
             writer = get_stream_writer()
             writer({
@@ -104,7 +109,9 @@ def _with_stream_events(
             })
         except RuntimeError:
             pass
-        return node_func(state)
+        if runtime is None:
+            return node_func(state)
+        return node_func(state, runtime) if node_func in (load_chat_memory_node, save_chat_memory_node) else node_func(state)
     return wrapped
 
 
@@ -125,11 +132,16 @@ def _route_after_rag_check(state: ReportChatState) -> str:
     return "generate_report_answer"
 
 
-def build_report_chat_graph() -> StateGraph:
+def build_report_chat_graph(
+    *,
+    checkpointer: BaseCheckpointSaver | None = None,
+    store: BaseStore | None = None,
+):
     graph = StateGraph(ReportChatState)
 
     _NODES: list[tuple[str, str, ReportChatNode]] = [
         ("load_report_context", "加载报告上下文", load_report_context_wrapper),
+        ("load_chat_memory", "加载对话记忆", load_chat_memory_node),
         ("classify_question_scope", "问题范围分类", classify_question_scope_node),
         ("retrieve_report_evidence", "报告证据检索", retrieve_report_evidence_node),
         ("should_use_rag", "RAG 判断", should_use_rag_node),
@@ -139,13 +151,15 @@ def build_report_chat_graph() -> StateGraph:
         ("generate_report_answer", "生成回答", generate_report_answer_node),
         ("boundary_response", "边界回应", boundary_response_node),
         ("persist_chat_message", "持久化消息", persist_chat_message_node),
+        ("save_chat_memory", "保存对话记忆", save_chat_memory_node),
     ]
 
     for node_key, node_name, node_func in _NODES:
         graph.add_node(node_key, _with_stream_events(node_key, node_name, node_func))
 
     graph.add_edge(START, "load_report_context")
-    graph.add_edge("load_report_context", "classify_question_scope")
+    graph.add_edge("load_report_context", "load_chat_memory")
+    graph.add_edge("load_chat_memory", "classify_question_scope")
 
     graph.add_conditional_edges(
         "classify_question_scope",
@@ -173,9 +187,10 @@ def build_report_chat_graph() -> StateGraph:
 
     graph.add_edge("generate_report_answer", "persist_chat_message")
     graph.add_edge("boundary_response", "persist_chat_message")
-    graph.add_edge("persist_chat_message", END)
+    graph.add_edge("persist_chat_message", "save_chat_memory")
+    graph.add_edge("save_chat_memory", END)
 
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer, store=store)
 
 
 def load_report_context_wrapper(state: ReportChatState) -> ReportChatState:
@@ -189,4 +204,8 @@ def load_report_context_wrapper(state: ReportChatState) -> ReportChatState:
         db.close()
 
 
-report_chat_graph = build_report_chat_graph()
+_persistence = get_report_chat_persistence()
+report_chat_graph = build_report_chat_graph(
+    checkpointer=_persistence.checkpointer if _persistence.enabled else None,
+    store=_persistence.store if _persistence.enabled else None,
+)

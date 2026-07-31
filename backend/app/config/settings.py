@@ -15,6 +15,10 @@ class Settings(BaseSettings):
         description="Comma-separated CORS origins.",
     )
     database_url: str = "mysql+pymysql://ioc_user:ioc_password@localhost:3306/ioc_ai"
+    langgraph_postgres_url: str = Field(
+        default="",
+        description="LangGraph 官方 Checkpointer/Store 使用的 PostgreSQL 连接串；为空时仅使用进程内实现。",
+    )
     app_timezone: str = "Asia/Shanghai"
     log_level: str = "INFO"
     redis_enabled: bool = False

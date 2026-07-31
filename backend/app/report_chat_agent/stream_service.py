@@ -17,6 +17,7 @@ from app.observability import build_langsmith_config
 from app.report_chat_agent.graph import report_chat_graph
 from app.report_chat_agent.report_chat_event_adapter import ReportChatEventAdapter
 from app.report_chat_agent.repositories import report_chat_repo
+from app.report_chat_agent.persistence import async_report_chat_graph
 from app.report_chat_agent.service import save_report_chat_usage
 from app.report_chat_agent.state import ReportChatState
 from app.security.content_moderator import ModerationAction, content_moderator
@@ -76,7 +77,6 @@ async def stream_chat_message(
         "metrics": [],
         "analysis_basis": {},
         "raw_data": {},
-        "chat_history": [],
         "question_scope": "report_internal",
         "scope_reason": "",
         "retrieved_context": [],
@@ -140,24 +140,27 @@ async def stream_chat_message(
     yield to_sse(*adapter.get_message_started())
 
     try:
-        async for mode, data in report_chat_graph.astream(
-            initial_state,
-            config=build_langsmith_config(
-                trace_id=trace_id,
-                graph_name="ioc_report_chat_graph",
-                user_id=user_id,
-                session_id=session_id,
-                conversation_id=session.conversation_id,
-                metadata={
-                    "report_id": str(report_id),
-                    "scene": initial_state["scene"],
-                    "streaming": True,
-                },
-            ),
-            stream_mode=["values", "updates", "custom"],
-        ):
-            for event_t, event_d in adapter.process(mode, data):
-                yield to_sse(event_t, event_d)
+        graph_config = build_langsmith_config(
+            trace_id=trace_id,
+            graph_name="ioc_report_chat_graph",
+            user_id=user_id,
+            session_id=session_id,
+            conversation_id=session.conversation_id,
+            metadata={
+                "report_id": str(report_id),
+                "scene": initial_state["scene"],
+                "streaming": True,
+            },
+        )
+        graph_config["configurable"] = {"thread_id": session_id}
+        async with async_report_chat_graph(report_chat_graph) as graph:
+            async for mode, data in graph.astream(
+                initial_state,
+                config=graph_config,
+                stream_mode=["values", "updates", "custom"],
+            ):
+                for event_t, event_d in adapter.process(mode, data):
+                    yield to_sse(event_t, event_d)
 
         # ── 答案校正 + message_completed ─────────────────
         final_state = adapter.get_final_state()

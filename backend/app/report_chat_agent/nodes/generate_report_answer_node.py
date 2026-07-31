@@ -11,13 +11,14 @@
   4. 各种失败场景都有兜底回答，LLM 调用失败时不阻塞 Graph。
 """
 
-import json
 from pathlib import Path
 
 from langgraph.config import get_stream_writer
 
 from app.config.settings import settings
+from app.core.config.llm_settings import llm_settings
 from app.report_chat_agent.answer_grounding import grounding_fallback, validate_grounded_answer
+from app.report_chat_agent.context_budget import build_context_budget, estimate_tokens
 from app.report_chat_agent.state import ReportChatState
 from app.runtime.llm.client import LlmResult, llm_client
 from app.security.content_moderator import ModerationAction, content_moderator
@@ -51,6 +52,7 @@ def generate_report_answer_node(state: ReportChatState) -> ReportChatState:
     used_rag = state.get("used_rag", False)
     rag_query = state.get("rag_query", {})
     chat_history = state.get("chat_history", [])
+    memory_context = state.get("memory_context", [])
     errors: list[dict] = state.get("errors", [])
 
     if _has_load_report_error(errors):
@@ -87,17 +89,38 @@ def generate_report_answer_node(state: ReportChatState) -> ReportChatState:
 
     system = _load_prompt("system_prompt.md")
 
-    prompt = template.format(
+    provider = llm_settings.get_provider("deepseek")
+    configured_input_budget = provider.max_input_tokens if provider else 8000
+    context_budget = build_context_budget(
         user_question=user_question,
-        report_context=json.dumps(report_context, ensure_ascii=False, indent=2),
-        retrieved_context=json.dumps(retrieved_context, ensure_ascii=False, indent=2),
-        evidence=json.dumps({
+        report_context=report_context,
+        evidence={
             "evidence": evidence,
             "analysis_basis": state.get("analysis_basis", {}),
-        }, ensure_ascii=False, indent=2),
-        merged_context=json.dumps(merged_context, ensure_ascii=False, indent=2),
-        rag_results=json.dumps(rag_results, ensure_ascii=False, indent=2),
-        chat_history=json.dumps(chat_history[-4:], ensure_ascii=False, indent=2),
+        },
+        retrieved_context=retrieved_context,
+        merged_context=merged_context,
+        memory_context=memory_context,
+        rag_results=rag_results if used_rag else [],
+        chat_history=chat_history[-4:],
+        input_budget=max(512, configured_input_budget - estimate_tokens(system)),
+    )
+    state["context_budget"] = {
+        "input_budget": configured_input_budget,
+        "estimated_tokens": context_budget["estimated_tokens"] + estimate_tokens(system),
+        "truncated": context_budget["truncated"],
+        "contexts": context_budget["contexts"],
+    }
+
+    prompt = template.format(
+        user_question=context_budget["user_question"],
+        report_context=context_budget["report_context"],
+        retrieved_context=context_budget["retrieved_context"],
+        evidence=context_budget["evidence"],
+        merged_context=context_budget["merged_context"],
+        rag_results=context_budget["rag_results"],
+        chat_history=context_budget["chat_history"],
+        memory_context=context_budget["memory_context"],
     )
 
     llm_usages: list[dict] = state.get("llm_usages", [])

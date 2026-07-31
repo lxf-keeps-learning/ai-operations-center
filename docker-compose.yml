@@ -1,4 +1,23 @@
 services:
+  postgres:
+    image: postgres:16
+    container_name: ai-operations-center-langgraph-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${LANGGRAPH_POSTGRES_DB:-langgraph}
+      POSTGRES_USER: ${LANGGRAPH_POSTGRES_USER:-langgraph}
+      POSTGRES_PASSWORD: ${LANGGRAPH_POSTGRES_PASSWORD:-langgraph_password}
+      TZ: Asia/Shanghai
+    ports:
+      - "${LANGGRAPH_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - langgraph_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LANGGRAPH_POSTGRES_USER:-langgraph} -d ${LANGGRAPH_POSTGRES_DB:-langgraph}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   mysql:
     image: mysql:8.4
     container_name: ai-operations-center-mysql
@@ -21,3 +40,4 @@ services:
 
 volumes:
   mysql_data:
+  langgraph_postgres_data:

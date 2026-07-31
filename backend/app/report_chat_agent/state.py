@@ -38,6 +38,9 @@ class ReportChatState(TypedDict, total=False):
     raw_data: dict[str, Any]
 
     chat_history: list[dict[str, Any]]
+    memory_context: list[dict[str, Any]]
+    memory_saved: bool
+    context_budget: dict[str, Any]
 
     question_scope: QuestionScope
     scope_reason: str
