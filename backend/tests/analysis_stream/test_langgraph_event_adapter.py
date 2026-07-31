@@ -6,10 +6,10 @@ from app.analysis_stream.langgraph_event_adapter import (
     _calc_progress,
     _detect_source_label,
 )
-from app.operation_agent.graph import NODE_METADATA
+from app.operation_agent.graph import NODE_METADATA, RUNTIME_NODE_ORDER
 
 
-NODE_ORDER = list(NODE_METADATA.keys())
+NODE_ORDER = list(RUNTIME_NODE_ORDER)
 RUN_ID = "test_adapter_001"
 
 
@@ -47,6 +47,27 @@ def test_adapter_exposes_agent_key_on_node_started():
 
     assert events[0]["node_key"] == "dispatch_domain_agent"
     assert events[0]["payload"]["agent_key"] == "maintenance"
+
+
+def test_adapter_exposes_registered_domain_agent_children_but_filters_unknown_nodes():
+    """Registered child nodes are additive; unknown runtime keys remain hidden."""
+    emitter = _make_emitter()
+    adapter = LangGraphEventAdapter(emitter, NODE_METADATA, NODE_ORDER)
+
+    registered = adapter.process("custom", {
+        "kind": "node_started",
+        "node_key": "maintenance_reason",
+        "agent_key": "maintenance",
+    })
+    unknown = adapter.process("custom", {
+        "kind": "node_started",
+        "node_key": "maintenance_agent",
+        "agent_key": "maintenance",
+    })
+
+    assert registered[0]["node_key"] == "maintenance_reason"
+    assert registered[0]["payload"]["agent_key"] == "maintenance"
+    assert unknown == []
 
 
 def test_adapter_ignores_unknown_runtime_node_with_agent_key():
@@ -205,14 +226,14 @@ def test_adapter_flush_no_pending():
 def test_calc_progress_started():
     """_calc_progress 在 started 状态应正确计算进度。"""
     assert _calc_progress("init_context", "started", NODE_ORDER) == 12
-    assert _calc_progress("analyze_reason", "started", NODE_ORDER) == 75
-    assert _calc_progress("summary", "started", NODE_ORDER) == 62
+    assert _calc_progress("analyze_reason", "started", NODE_ORDER) is None
+    assert _calc_progress("summary", "started", NODE_ORDER) == 87
 
 
 def test_calc_progress_completed():
     """_calc_progress 在 completed 状态应正确计算进度。"""
     assert _calc_progress("init_context", "completed", NODE_ORDER) == 25
-    assert _calc_progress("summary", "completed", NODE_ORDER) == 75
+    assert _calc_progress("summary", "completed", NODE_ORDER) == 100
 
 
 def test_calc_progress_unknown_key():

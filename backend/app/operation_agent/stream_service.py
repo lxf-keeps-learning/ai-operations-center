@@ -23,7 +23,12 @@ from app.analysis_stream.langgraph_event_adapter import LangGraphEventAdapter
 from app.analysis_stream.schemas import AnalysisStreamEvent
 from app.db.session import get_session_local
 from app.observability import build_langsmith_config
-from app.operation_agent.graph import NODE_METADATA, operation_graph
+from app.operation_agent.graph import (
+    NODE_METADATA,
+    RUNTIME_NODE_ORDER,
+    build_runtime_node_order,
+    operation_graph,
+)
 from app.operation_agent.models.analysis_event_model import AnalysisEvent
 from app.operation_agent.schemas.request import OperationAnalyzeRequest
 from app.operation_agent.services.record_service import save_analysis_result
@@ -33,7 +38,8 @@ from app.utils.ids import new_trace_id
 
 logger = logging.getLogger(__name__)
 
-NODE_ORDER = list(NODE_METADATA.keys())
+# Retain a stable default export while each stream uses its routed runtime order.
+NODE_ORDER = list(RUNTIME_NODE_ORDER)
 
 
 def _append_event(state: OperationState, event: AnalysisStreamEvent) -> None:
@@ -109,7 +115,11 @@ async def stream_operation_analysis(
         yield _emit_event(initial_state, emitter, emitter.create_stream_closed())
         return
 
-    adapter = LangGraphEventAdapter(emitter, NODE_METADATA, NODE_ORDER)
+    adapter = LangGraphEventAdapter(
+        emitter,
+        NODE_METADATA,
+        build_runtime_node_order(request.domain),
+    )
     current_node_key: str | None = None
     current_node_name: str | None = None
 

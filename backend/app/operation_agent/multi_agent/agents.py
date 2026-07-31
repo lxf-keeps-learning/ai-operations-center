@@ -2,12 +2,14 @@
 
 from dataclasses import dataclass
 
+from app.operation_agent.state import OperationDomain
+
 
 @dataclass(frozen=True)
 class DomainAgentSpec:
     """Immutable configuration shared by a domain agent's reason/advice steps."""
 
-    key: str
+    key: OperationDomain
     label: str
     reason_prompt: str
     advice_prompt: str
@@ -15,7 +17,7 @@ class DomainAgentSpec:
     advice_action_type: str
 
 
-DOMAIN_AGENT_SPECS: dict[str, DomainAgentSpec] = {
+DOMAIN_AGENT_SPECS: dict[OperationDomain, DomainAgentSpec] = {
     "safety": DomainAgentSpec(
         key="safety",
         label="本质安全",

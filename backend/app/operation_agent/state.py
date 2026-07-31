@@ -70,8 +70,8 @@ class OperationState(TypedDict, total=False):
     llm_usages: list[dict[str, Any]]
 
     event_log: NotRequired[list[dict[str, Any]]]
-    supervisor_route: NotRequired[str]
-    active_agent: NotRequired[str]
+    supervisor_route: NotRequired[OperationDomain]
+    active_agent: NotRequired[OperationDomain]
     agent_events: NotRequired[list[dict[str, Any]]]
     _event_persistence_disabled: NotRequired[bool]
     _streaming: NotRequired[bool]

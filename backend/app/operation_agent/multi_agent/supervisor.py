@@ -1,15 +1,18 @@
 """Supervisor domain normalization and routing."""
 
+from typing import cast
+
 from app.operation_agent.multi_agent.agents import DOMAIN_AGENT_SPECS
 from app.operation_agent.state import OperationDomain, OperationState
 
 
-def normalize_domain(state: OperationState) -> str:
+def normalize_domain(state: OperationState) -> OperationDomain:
     """Normalize the requested domain and record invalid-domain errors."""
 
+    page_context = state.setdefault("page_context", {})
     requested = state.get("domain")
     if requested is None:
-        requested = state.get("page_context", {}).get("domain")
+        requested = page_context.get("domain")
 
     errors = state.setdefault("errors", [])
     if requested not in DOMAIN_AGENT_SPECS:
@@ -21,13 +24,14 @@ def normalize_domain(state: OperationState) -> str:
         )
         normalized: OperationDomain = "safety"
     else:
-        normalized = requested
+        normalized = cast(OperationDomain, requested)
 
     state["domain"] = normalized
+    page_context["domain"] = normalized
     return normalized
 
 
-def route_domain_agent(state: OperationState) -> str:
+def route_domain_agent(state: OperationState) -> OperationDomain:
     """Route the state to its normalized domain agent."""
 
     domain = normalize_domain(state)
