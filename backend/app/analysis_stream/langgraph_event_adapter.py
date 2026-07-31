@@ -101,6 +101,15 @@ def _llm_source_label(state: dict[str, Any], formatted: str) -> str:
     return f"LLM · {formatted}"
 
 
+def _agent_payload(state: dict[str, Any]) -> dict[str, str] | None:
+    """Extract an optional Supervisor route without changing legacy event shapes."""
+    for field in ("agent_key", "active_agent", "supervisor_route"):
+        agent_key = state.get(field)
+        if isinstance(agent_key, str) and agent_key:
+            return {"agent_key": agent_key}
+    return None
+
+
 class LangGraphEventAdapter:
     """将 LangGraph astream 输出转换为 AnalysisStreamEvent。
 
@@ -159,6 +168,7 @@ class LangGraphEventAdapter:
         if kind != "node_started":
             return []
         node_key = data.get("node_key", "")
+        agent_payload = _agent_payload(data)
         if (
             not node_key
             or node_key not in self._node_metadata
@@ -173,6 +183,7 @@ class LangGraphEventAdapter:
             node_key=node_key,
             node_name=meta.get("name", node_key),
             message=meta.get("message_started", f"{node_key} 执行中"),
+            payload=agent_payload,
             progress=_calc_progress(node_key, "started", self._node_order),
         )
         return [event]
@@ -206,6 +217,7 @@ class LangGraphEventAdapter:
                 message=meta.get(
                     "message_completed", f"{node_key} 执行完成",
                 ),
+                payload=_agent_payload(safe_update),
                 duration_ms=duration_ms,
                 source_label=source_label,
                 progress=_calc_progress(

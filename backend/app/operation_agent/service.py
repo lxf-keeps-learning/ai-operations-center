@@ -91,6 +91,7 @@ def analyze_operation(
                 "company_ref": request.company_id,
                 "project_ref": request.project_id,
                 "streaming": False,
+                "agent_key": request.domain,
             },
         ),
     )

@@ -40,6 +40,7 @@ def init_context_node(state: OperationState) -> OperationState:
     state["advice_items"] = []
     state["evidence"] = []
     state["llm_usages"] = []
-    state["errors"] = []
+    state.setdefault("agent_events", [])
+    state.setdefault("errors", [])
     state["final_answer"] = ""
     return state
