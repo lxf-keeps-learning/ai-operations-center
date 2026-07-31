@@ -50,8 +50,9 @@ def test_route_domain_agent_maps_each_business_domain():
 def test_invalid_domain_falls_back_to_safety_and_records_error():
     state = {"domain": "unknown", "errors": []}
     assert normalize_domain(state) == "safety"
-    assert state["supervisor_route"] == "safety"
     assert state["errors"][0]["node"] == "supervisor"
+    assert route_domain_agent(state) == "safety"
+    assert state["supervisor_route"] == "safety"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -190,7 +191,7 @@ Expected: FAIL because the Supervisor Graph does not exist.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Build this exact parent edge sequence: `START → supervisor_route → init_context → query_operation_data → detect_abnormal → dispatch_domain_agent → summary → END`. The dispatch node calls `route_domain_agent`, selects `DOMAIN_AGENT_SPECS[state["supervisor_route"]]`, and calls `run_domain_agent`. Wrap parent nodes with the existing custom `node_started` writer. Add metadata for Supervisor and Agent nodes while retaining the original six node keys. Initialize new state containers in `init_context_node` without clearing an already selected route. Re-export the Supervisor graph from the old `graph.py`, and keep `build_operation_graph()` as a compatibility function.
+Build this exact parent edge sequence: `START → supervisor_route → init_context → query_operation_data → detect_abnormal → dispatch_domain_agent → summary → END`. The dispatch node calls `route_domain_agent`, selects `DOMAIN_AGENT_SPECS[state["supervisor_route"]]`, and calls `run_domain_agent`. Wrap parent nodes with the existing custom `node_started` writer. Add metadata for Supervisor and Agent nodes while retaining the original six node keys. Initialize new state containers in `init_context_node` without clearing an already selected route or existing errors. Re-export the Supervisor graph from the old `graph.py`, and keep `build_operation_graph()` as a compatibility function.
 
 - [ ] **Step 4: Run focused tests**
 
