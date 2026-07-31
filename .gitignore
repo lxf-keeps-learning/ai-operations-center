@@ -8,6 +8,8 @@ __pycache__/
 *.egg-info/
 dist/
 .worktrees/
+.superpowers/
+frontend/pnpm-lock.yaml
 
 # Sprint 设计文档，不上传 Git
 docs/sprints/

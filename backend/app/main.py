@@ -17,6 +17,10 @@ from app.report_chat_agent.api.chat_api import router as report_chat_router
 from app.skills.api import router as skills_router
 from app.tools.api import router as tools_router
 from app.tools.register import register_all_tools
+from app.modules.prompt_center.api.router import router as prompt_center_router
+from app.modules.evaluation_center.api.router import router as evaluation_center_router
+from app.modules.experiment_center.api.router import router as experiment_center_router
+from app.modules.failure_center.api.router import router as failure_center_router
 
 MCP_MOUNT_PATH = "/mcp"
 
@@ -58,6 +62,10 @@ def create_app() -> FastAPI:
     app.include_router(skills_router, prefix=settings.api_v1_prefix)
     app.include_router(cache.router, prefix="/api/cache", tags=["Cache"])
     app.include_router(items.router, prefix=f"{settings.api_v1_prefix}/items", tags=["Items"])
+    app.include_router(prompt_center_router, prefix=settings.api_v1_prefix)
+    app.include_router(evaluation_center_router, prefix=settings.api_v1_prefix)
+    app.include_router(experiment_center_router, prefix=settings.api_v1_prefix)
+    app.include_router(failure_center_router, prefix=settings.api_v1_prefix)
 
     @app.get("/", include_in_schema=False)
     async def root() -> RedirectResponse:

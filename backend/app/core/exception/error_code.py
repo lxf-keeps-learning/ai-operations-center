@@ -63,6 +63,33 @@ LLM_RESPONSE_FORMAT_ERROR = ErrorCode(code=500102, message="大模型返回格�
 DB_CONNECTION_ERROR = ErrorCode(code=503001, message="数据库连接失败", http_status=503, description="MySQL 不可用")
 REDIS_CONNECTION_ERROR = ErrorCode(code=503002, message="Redis 连接失败", http_status=503, description="Redis 不可用")
 
+# ── Prompt Center 错误码 (404010-404099, 400010-400099, 403010-403099) ──
+PROMPT_NOT_FOUND_PC = ErrorCode(code=404010, message="Prompt 不存在", http_status=404, description="指定的 Prompt 不存在")
+VERSION_NOT_FOUND_PC = ErrorCode(code=404011, message="Prompt 版本不存在", http_status=404, description="指定的 Prompt 版本不存在")
+TEST_CASE_NOT_FOUND_PC = ErrorCode(code=404013, message="测试用例不存在", http_status=404, description="测试用例未找到")
+RELEASE_NOT_FOUND_PC = ErrorCode(code=404014, message="发布记录不存在", http_status=404, description="发布记录未找到")
+PROMPT_KEY_EXISTS = ErrorCode(code=400010, message="Prompt Key 已存在", http_status=400, description="Prompt Key 已被占用")
+VARIABLE_MISSING = ErrorCode(code=400013, message="必填变量缺失", http_status=400, description="渲染 Prompt 时缺少必填变量")
+VERSION_LOCKED_PC = ErrorCode(code=400012, message="版本已锁定无法编辑", http_status=400, description="已发布版本不可修改")
+NOT_APPROVED_PC = ErrorCode(code=400016, message="版本未审核通过", http_status=400, description="只有审核通过的版本才能发布")
+INVALID_STATUS_TRANSITION = ErrorCode(code=400014, message="状态流转无效", http_status=400, description="当前状态不允许执行此操作")
+CANNOT_EDIT_PROTECTED = ErrorCode(code=403010, message="不可编辑受保护字段", http_status=403, description="运营人员不能修改系统层 Prompt")
+PROMPT_SYNC_FAILED = ErrorCode(code=502010, message="Prompt 同步失败", http_status=502, description="LangSmith Prompt Hub 同步失败")
+
+# ── Evaluation Center 错误码 (404020-404029, 400020-400029, 500020-500029) ──
+EVALUATION_NOT_FOUND = ErrorCode(code=404020, message="评估结果不存在", http_status=404, description="指定的评估记录不存在")
+EVALUATION_RESULT_FAILED = ErrorCode(code=500020, message="评估执行失败", http_status=500, description="评估器执行异常")
+INVALID_EVALUATOR = ErrorCode(code=400020, message="评估器不存在", http_status=400, description="指定的评估器未注册")
+
+# ── Experiment Center 错误码 (404030-404039, 400030-400039) ──
+EXPERIMENT_NOT_FOUND = ErrorCode(code=404030, message="实验不存在", http_status=404, description="指定的实验不存在")
+EXPERIMENT_RESULT_NOT_FOUND = ErrorCode(code=404031, message="实验结果不存在", http_status=404, description="指定的实验结果不存在")
+EXPERIMENT_ALREADY_RUNNING = ErrorCode(code=400030, message="实验正在运行中", http_status=400, description="实验正在执行，不能重复触发")
+INVALID_VERSION_PAIR = ErrorCode(code=400031, message="版本必须属于同一个 Prompt", http_status=400, description="两个版本必须属于同一个 Prompt 定义")
+
+# ── Failure Center 错误码 (404040-404049) ──
+FAILURE_NOT_FOUND = ErrorCode(code=404040, message="失败案例不存在", http_status=404, description="指定的失败案例不存在")
+
 # ── 所有错误码列表（用于注册和文档展示） ────────────────
 ALL_CODES: list[ErrorCode] = [
     SUCCESS,
@@ -89,6 +116,25 @@ ALL_CODES: list[ErrorCode] = [
     LLM_RESPONSE_FORMAT_ERROR,
     DB_CONNECTION_ERROR,
     REDIS_CONNECTION_ERROR,
+    PROMPT_NOT_FOUND_PC,
+    VERSION_NOT_FOUND_PC,
+    TEST_CASE_NOT_FOUND_PC,
+    RELEASE_NOT_FOUND_PC,
+    PROMPT_KEY_EXISTS,
+    VARIABLE_MISSING,
+    VERSION_LOCKED_PC,
+    NOT_APPROVED_PC,
+    INVALID_STATUS_TRANSITION,
+    CANNOT_EDIT_PROTECTED,
+    PROMPT_SYNC_FAILED,
+    EVALUATION_NOT_FOUND,
+    EVALUATION_RESULT_FAILED,
+    INVALID_EVALUATOR,
+    EXPERIMENT_NOT_FOUND,
+    EXPERIMENT_RESULT_NOT_FOUND,
+    EXPERIMENT_ALREADY_RUNNING,
+    INVALID_VERSION_PAIR,
+    FAILURE_NOT_FOUND,
 ]
 
 _CODE_MAP: dict[int, ErrorCode] = {ec.code: ec for ec in ALL_CODES}

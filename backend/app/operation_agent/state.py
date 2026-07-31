@@ -68,6 +68,7 @@ class OperationState(TypedDict, total=False):
     analysis_basis: dict[str, Any]
     final_answer: str
     llm_usages: list[dict[str, Any]]
+    prompt_facts: NotRequired[dict[str, dict[str, Any]]]
 
     event_log: NotRequired[list[dict[str, Any]]]
     supervisor_route: NotRequired[OperationDomain]

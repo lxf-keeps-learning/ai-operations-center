@@ -16,6 +16,22 @@
 - Redis（当前本地开发默认不启用，后续部署预留）
 - REST + SSE
 
+## LangSmith Prompt 自动同步
+
+Trace 上报和 Prompt Hub 同步使用两个独立开关：
+
+```text
+# 本地离线开发和自动化测试
+LANGSMITH_TRACING=false
+LANGSMITH_PROMPT_SYNC_ENABLED=false
+
+# 严格同步模式
+LANGSMITH_PROMPT_SYNC_ENABLED=true
+LANGSMITH_API_KEY=<通过本地环境或密钥管理系统注入>
+```
+
+严格同步模式下，灰度或正式发布会先把不可变 Prompt Version 作为 private `ChatPromptTemplate` 推送到 LangSmith，再保存 Commit Hash 和版本 Tag。同步失败返回 HTTP 502，且不会停用当前 active release；同一版本重复发布复用已有 Commit，回滚不创建新 Commit。IOC 仍是编辑、审核、发布和回滚的权威控制面，LangSmith 用于 Commit 与 Trace 关联。
+
 ## 基础设施快速索引
 
 项目规模变大后，先按下面这张表找基础设施入口：
@@ -32,6 +48,7 @@
 | 统一异常与业务错误码                   | `app/core/exception/`                                                             | `AppException`、错误码定义、FastAPI 异常处理器                                              |
 | Trace / Request Context                | `app/core/middleware/trace_middleware.py`、`app/core/context/`、`app/core/trace/` | 请求链路 ID、上下文持有、Trace 透传                                                         |
 | LangSmith Agent Trace                  | `app/observability/langsmith_tracing.py`                                         | Graph/Node/LLM 执行树、脱敏、采样和 IOC traceId 关联                                        |
+| LangSmith Prompt 同步                  | `app/modules/prompt_center/infrastructure/langsmith_client.py`                    | 发布前推送 private Prompt Commit；与 Trace 开关独立                                         |
 | 日志初始化                             | `app/core/logging/logger.py`                                                      | 后端日志格式和日志级别初始化                                                                |
 | MySQL 连接和 Session 依赖              | `app/db/session.py`、`app/db/base.py`                                             | SQLAlchemy Engine、SessionLocal、FastAPI `get_db` 依赖                                      |
 | Redis 可选健康检查                     | `app/db/redis.py`、`app/api/routes/cache.py`                                      | Redis 本地默认非强依赖，仅用于 ping/预留缓存能力                                            |
