@@ -7,6 +7,7 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 dist/
+.worktrees/
 
 # Sprint 设计文档，不上传 Git
 docs/sprints/
