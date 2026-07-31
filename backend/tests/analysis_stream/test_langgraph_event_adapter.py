@@ -34,6 +34,34 @@ def test_adapter_node_started_from_custom():
     assert events[0]["status"] == "running"
 
 
+def test_adapter_exposes_agent_key_on_node_started():
+    """Agent routing metadata from custom events remains available to SSE consumers."""
+    emitter = _make_emitter()
+    adapter = LangGraphEventAdapter(emitter, NODE_METADATA, NODE_ORDER)
+
+    events = adapter.process("custom", {
+        "kind": "node_started",
+        "node_key": "maintenance_agent",
+        "agent_key": "maintenance",
+    })
+
+    assert events[0]["node_key"] == "maintenance_agent"
+    assert events[0]["payload"]["agent_key"] == "maintenance"
+
+
+def test_adapter_exposes_agent_key_on_node_completed_from_state_update():
+    """Agent routing metadata from a state update remains available on completion."""
+    emitter = _make_emitter()
+    adapter = LangGraphEventAdapter(emitter, NODE_METADATA, NODE_ORDER)
+
+    events = adapter.process("updates", {
+        "dispatch_domain_agent": {"active_agent": "maintenance"},
+    })
+
+    assert events[0]["node_key"] == "dispatch_domain_agent"
+    assert events[0]["payload"]["agent_key"] == "maintenance"
+
+
 def test_adapter_node_completed_from_updates():
     """updates 中节点更新应转换为 node_completed 事件。"""
     emitter = _make_emitter()
@@ -162,15 +190,15 @@ def test_adapter_flush_no_pending():
 
 def test_calc_progress_started():
     """_calc_progress 在 started 状态应正确计算进度。"""
-    assert _calc_progress("init_context", "started", NODE_ORDER) == 0
-    assert _calc_progress("analyze_reason", "started", NODE_ORDER) == int(3 * 100 / 6)
-    assert _calc_progress("summary", "started", NODE_ORDER) == int(5 * 100 / 6)
+    assert _calc_progress("init_context", "started", NODE_ORDER) == 12
+    assert _calc_progress("analyze_reason", "started", NODE_ORDER) == 75
+    assert _calc_progress("summary", "started", NODE_ORDER) == 62
 
 
 def test_calc_progress_completed():
     """_calc_progress 在 completed 状态应正确计算进度。"""
-    assert _calc_progress("init_context", "completed", NODE_ORDER) == int(1 * 100 / 6)
-    assert _calc_progress("summary", "completed", NODE_ORDER) == 100
+    assert _calc_progress("init_context", "completed", NODE_ORDER) == 25
+    assert _calc_progress("summary", "completed", NODE_ORDER) == 75
 
 
 def test_calc_progress_unknown_key():

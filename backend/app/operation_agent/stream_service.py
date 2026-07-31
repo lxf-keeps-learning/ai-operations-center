@@ -127,6 +127,7 @@ async def stream_operation_analysis(
                     "company_ref": request.company_id,
                     "project_ref": request.project_id,
                     "streaming": True,
+                    "agent_key": request.domain,
                 },
             ),
             stream_mode=["values", "updates", "custom"],
@@ -229,6 +230,9 @@ async def stream_operation_analysis(
         "analysis_basis": final_state.get("analysis_basis", {}),
         "errors": final_state.get("errors", []),
     }
+    agent_key = final_state.get("active_agent") or final_state.get("supervisor_route")
+    if isinstance(agent_key, str) and agent_key:
+        report_payload["agent_key"] = agent_key
     yield _emit_event(
         final_state,
         emitter,

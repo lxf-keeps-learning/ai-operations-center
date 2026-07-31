@@ -15,6 +15,7 @@ class AnalysisStreamEvent(TypedDict, total=False):
     event_type: str
     node_key: NotRequired[str]
     node_name: NotRequired[str]
+    agent_key: NotRequired[str]
     status: str
     message: str
     duration_ms: NotRequired[int]
