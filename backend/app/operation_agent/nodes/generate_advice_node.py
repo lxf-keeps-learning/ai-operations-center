@@ -26,7 +26,12 @@ def _load_prompt(name: str) -> str:
     return ""
 
 
-def generate_advice_node(state: OperationState) -> OperationState:
+def generate_advice_node(
+    state: OperationState,
+    *,
+    prompt_name: str = "operation_advice.md",
+    action_type: str = "generate_advice",
+) -> OperationState:
     reason = state.get("reason_analysis", "")
     abnormal = state.get("abnormal_items", [])
     evidence = state.get("evidence", [])
@@ -36,7 +41,7 @@ def generate_advice_node(state: OperationState) -> OperationState:
         state["advice_items"] = []
         return state
 
-    template = _load_prompt("operation_advice.md") or "基于异常生成建议: {abnormal_items}"
+    template = _load_prompt(prompt_name) or "基于异常生成建议: {abnormal_items}"
     system = _load_prompt("system_prompt.md")
 
     prompt = template.format(
@@ -54,7 +59,7 @@ def generate_advice_node(state: OperationState) -> OperationState:
             timeout_seconds=settings.operation_llm_timeout_seconds,
         )
         llm_usages.append({
-            "action_type": "generate_advice",
+            "action_type": action_type,
             "model_name": result.model,
             "input_tokens": result.prompt_tokens,
             "output_tokens": result.completion_tokens,
@@ -78,7 +83,7 @@ def generate_advice_node(state: OperationState) -> OperationState:
             )
     except Exception as e:
         llm_usages.append({
-            "action_type": "generate_advice",
+            "action_type": action_type,
             "model_name": "deepseek-chat",
             "input_tokens": 0,
             "output_tokens": 0,

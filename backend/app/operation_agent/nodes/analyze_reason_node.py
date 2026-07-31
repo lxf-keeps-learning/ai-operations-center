@@ -26,7 +26,12 @@ def _load_prompt(name: str) -> str:
     return ""
 
 
-def analyze_reason_node(state: OperationState) -> OperationState:
+def analyze_reason_node(
+    state: OperationState,
+    *,
+    prompt_name: str = "operation_analysis.md",
+    action_type: str = "analyze_reason",
+) -> OperationState:
     metrics = state.get("metrics", [])
     abnormal = state.get("abnormal_items", [])
     page_ctx = state.get("page_context", {})
@@ -37,7 +42,7 @@ def analyze_reason_node(state: OperationState) -> OperationState:
         state["reason_analysis"] = "当前时段未发现明显异常，所有指标均在正常范围内。"
         return state
 
-    template = _load_prompt("operation_analysis.md") or "分析以下异常: {abnormal_items}"
+    template = _load_prompt(prompt_name) or "分析以下异常: {abnormal_items}"
     system = _load_prompt("system_prompt.md")
 
     prompt = template.format(
@@ -56,7 +61,7 @@ def analyze_reason_node(state: OperationState) -> OperationState:
             timeout_seconds=settings.operation_llm_timeout_seconds,
         )
         llm_usages.append({
-            "action_type": "analyze_reason",
+            "action_type": action_type,
             "model_name": result.model,
             "input_tokens": result.prompt_tokens,
             "output_tokens": result.completion_tokens,
@@ -78,7 +83,7 @@ def analyze_reason_node(state: OperationState) -> OperationState:
             )
     except Exception as e:
         llm_usages.append({
-            "action_type": "analyze_reason",
+            "action_type": action_type,
             "model_name": "deepseek-chat",
             "input_tokens": 0,
             "output_tokens": 0,
