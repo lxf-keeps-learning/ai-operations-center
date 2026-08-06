@@ -5,7 +5,7 @@ Prompt 是 AI 对话的系统提示词模板，支持版本管理。
 提供创建、查询活跃版本、查询版本列表、更新状态等操作。
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -16,6 +16,24 @@ from app.core.exception.base_exception import AppException
 from app.core.exception.error_code import NOT_FOUND
 
 router = APIRouter()
+
+
+@router.get("/runtime/prompts", response_model=ApiResponse[list[PromptResponse]])
+def list_prompts(
+    status: str | None = Query(default=None),
+    scene_code: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> ApiResponse[list[PromptResponse]]:
+    records = prompt_service.list_recent(
+        db,
+        status=status,
+        scene_code=scene_code,
+        limit=page_size,
+        offset=(page - 1) * page_size,
+    )
+    return ApiResponse(data=records)
 
 
 @router.post("/runtime/prompts", response_model=ApiResponse[PromptResponse], status_code=201)

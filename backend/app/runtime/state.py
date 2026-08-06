@@ -42,6 +42,7 @@ class RuntimeGraphState(TypedDict, total=False):
     conversation_id: str | None
     biz_type: str | None
     prompt_code: str | None
+    retry_of_session_id: str | None
 
     conversation: Any
     history_messages: list[dict[str, str]]

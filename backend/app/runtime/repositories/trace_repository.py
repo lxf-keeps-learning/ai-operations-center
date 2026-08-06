@@ -80,3 +80,20 @@ class TraceRepository:
             .order_by(AiTrace.created_at.asc())
         )
         return list(db.scalars(stmt).all())
+
+    def list_recent(
+        self,
+        db: Session,
+        *,
+        graph_name: str | None = None,
+        span_type: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[AiTrace]:
+        stmt = select(AiTrace)
+        if graph_name:
+            stmt = stmt.where(AiTrace.graph_name == graph_name)
+        if span_type:
+            stmt = stmt.where(AiTrace.span_type == span_type)
+        stmt = stmt.order_by(AiTrace.created_at.desc()).offset(offset).limit(limit)
+        return list(db.scalars(stmt).all())

@@ -32,6 +32,10 @@ class PromptService:
         records = _repo.get_versions_by_code(db, code)
         return [PromptResponse.model_validate(r) for r in records]
 
+    def list_recent(self, db: Session, **filters: object) -> list[PromptResponse]:
+        records = _repo.list_recent(db, **filters)
+        return [PromptResponse.model_validate(record) for record in records]
+
     def update_status(self, db: Session, prompt_id: str, status: str) -> PromptResponse | None:
         """更新 Prompt 状态（如 draft → active）"""
         record = _repo.update_status(db, prompt_id, status)

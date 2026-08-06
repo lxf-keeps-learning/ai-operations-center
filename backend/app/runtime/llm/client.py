@@ -18,6 +18,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from app.core.config.llm_settings import LLMProviderConfig, llm_settings
+from app.runtime.execution_control import RuntimeCancelledError
 from app.utils.timezone import now_local
 
 
@@ -32,6 +33,7 @@ class LlmResult:
     success: bool
     error_message: str = ""
     system_prompt: str = ""
+    cancelled: bool = False
 
 
 def _default_runtime_prompt(provider: LLMProviderConfig) -> str:
@@ -91,20 +93,31 @@ def _normalize_history(history: list[dict[str, str]] | None) -> list[dict[str, s
 class LlmClient:
     def __init__(self) -> None:
         self._models: dict[str, ChatOpenAI] = {}
-        self._default_provider = "deepseek"
         self._init_models()
+
+    def _build_model(self, provider: LLMProviderConfig) -> ChatOpenAI:
+        return ChatOpenAI(
+            model=provider.model,
+            api_key=provider.api_key,
+            base_url=provider.base_url,
+            max_tokens=provider.max_output_tokens,
+            temperature=0.3,
+            timeout=60,
+        )
 
     def _init_models(self) -> None:
         for provider in llm_settings.all_providers:
             if provider.enabled and provider.api_key:
-                self._models[provider.provider] = ChatOpenAI(
-                    model=provider.model,
-                    api_key=provider.api_key,
-                    base_url=provider.base_url,
-                    max_tokens=provider.max_output_tokens,
-                    temperature=0.3,
-                    timeout=60,
-                )
+                self._models[provider.provider] = self._build_model(provider)
+
+    def _get_model(self, provider: LLMProviderConfig) -> ChatOpenAI | None:
+        if not provider.api_key:
+            return None
+        model = self._models.get(provider.provider)
+        if model is None or getattr(model, "model_name", None) != provider.model:
+            model = self._build_model(provider)
+            self._models[provider.provider] = model
+        return model
 
     def chat(
         self,
@@ -114,7 +127,7 @@ class LlmClient:
         timeout_seconds: float | None = None,
         provider_name: str | None = None,
     ) -> LlmResult:
-        provider_name = provider_name or self._default_provider
+        provider_name = provider_name or llm_settings.default_provider
         provider = llm_settings.get_provider(provider_name)
 
         if not provider:
@@ -130,7 +143,7 @@ class LlmClient:
                 system_prompt="",
             )
 
-        model = self._models.get(provider_name)
+        model = self._get_model(provider)
         if not model:
             return LlmResult(
                 content="",
@@ -175,6 +188,20 @@ class LlmClient:
                 success=True,
                 system_prompt=system_content,
             )
+        except RuntimeCancelledError:
+            cost_ms = max(1, int((perf_counter() - start) * 1000))
+            return LlmResult(
+                content="".join(content_parts),
+                model=model_name,
+                prompt_tokens=usage.get("input_tokens", 0),
+                completion_tokens=usage.get("output_tokens", 0),
+                total_tokens=usage.get("total_tokens", 0),
+                cost_ms=cost_ms,
+                success=False,
+                error_message="Session 已取消",
+                system_prompt=system_content,
+                cancelled=True,
+            )
         except Exception as e:
             cost_ms = max(1, int((perf_counter() - start) * 1000))
             error_msg = str(e)
@@ -202,7 +229,7 @@ class LlmClient:
         provider_name: str | None = None,
     ) -> LlmResult:
         """真实消费模型流并逐段回调，同时汇总为兼容原接口的 LlmResult。"""
-        provider_name = provider_name or self._default_provider
+        provider_name = provider_name or llm_settings.default_provider
         provider = llm_settings.get_provider(provider_name)
 
         if not provider:
@@ -218,7 +245,7 @@ class LlmClient:
                 system_prompt="",
             )
 
-        model = self._models.get(provider_name)
+        model = self._get_model(provider)
         if not model:
             return LlmResult(
                 content="",

@@ -28,6 +28,14 @@ class SessionService:
             return None
         return SessionResponse.model_validate(record)
 
+    def list_recent(self, db: Session, **filters: object) -> list[SessionResponse]:
+        records = _repo.list_recent(db, **filters)
+        return [SessionResponse.model_validate(record) for record in records]
+
+    def list_by_conversation(self, db: Session, conversation_id: str) -> list[SessionResponse]:
+        records = _repo.list_by_conversation(db, conversation_id)
+        return [SessionResponse.model_validate(record) for record in records]
+
     def list_recent_messages(
         self,
         db: Session,

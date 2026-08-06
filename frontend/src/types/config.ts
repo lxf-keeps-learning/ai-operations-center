@@ -7,6 +7,7 @@ export interface ModelProvider {
   maxInputTokens: number
   maxOutputTokens: number
   rpmLimit: number
+  modelVersions: string[]
 }
 
 export interface RuntimeEnv {

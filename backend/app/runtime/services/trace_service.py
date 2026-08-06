@@ -35,5 +35,9 @@ class TraceService:
         records = _repo.list_by_session_id(db, session_id)
         return [TraceResponse.model_validate(r) for r in records]
 
+    def list_recent(self, db: Session, **filters: object) -> list[TraceResponse]:
+        records = _repo.list_recent(db, **filters)
+        return [TraceResponse.model_validate(record) for record in records]
+
 
 trace_service = TraceService()

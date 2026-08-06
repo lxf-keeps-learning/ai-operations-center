@@ -9,8 +9,15 @@ import router from './router'
 import './assets/styles/base.css'
 import './assets/styles/theme.css'
 
-createApp(App)
-  .use(createPinia())
+const pinia = createPinia()
+const app = createApp(App)
+
+app
+  .use(pinia)
   .use(router)
   .use(ElementPlus, { locale: zhCn })
-  .mount('#app')
+
+import { useThemeStore } from './stores/theme'
+
+useThemeStore(pinia).initialize()
+app.mount('#app')

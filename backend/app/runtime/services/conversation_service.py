@@ -27,6 +27,10 @@ class ConversationService:
             return None
         return ConversationResponse.model_validate(record)
 
+    def list_recent(self, db: Session, **filters: object) -> list[ConversationResponse]:
+        records = _repo.list_recent(db, **filters)
+        return [ConversationResponse.model_validate(record) for record in records]
+
     def update(self, db: Session, conversation_id: str, payload: ConversationUpdate) -> ConversationResponse | None:
         """更新会话信息（如标题、状态等）"""
         record = _repo.update(db, conversation_id, payload)

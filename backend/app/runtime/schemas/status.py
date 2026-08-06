@@ -2,7 +2,7 @@
 运行时状态常量 — 定义所有实体允许的状态值
 
 Conversation: created / active / closed / archived
-Session:      created / running / success / failed / cancelled / expired
+Session:      created / running / cancel_requested / success / failed / cancelled / expired
 Prompt:       draft / active / inactive / archived
 Trace:        success / failed / running
 Feedback:     inaccurate / incomplete / useful / unsafe / other
@@ -19,11 +19,21 @@ CONV_STATUSES = {CONV_CREATED, CONV_ACTIVE, CONV_CLOSED, CONV_ARCHIVED}
 SESS_CREATED = "created"
 SESS_QUEUED = "queued"
 SESS_RUNNING = "running"
+SESS_CANCEL_REQUESTED = "cancel_requested"
 SESS_SUCCESS = "success"
 SESS_FAILED = "failed"
 SESS_CANCELLED = "cancelled"
 SESS_EXPIRED = "expired"
-SESS_STATUSES = {SESS_CREATED, SESS_QUEUED, SESS_RUNNING, SESS_SUCCESS, SESS_FAILED, SESS_CANCELLED, SESS_EXPIRED}
+SESS_STATUSES = {
+    SESS_CREATED,
+    SESS_QUEUED,
+    SESS_RUNNING,
+    SESS_CANCEL_REQUESTED,
+    SESS_SUCCESS,
+    SESS_FAILED,
+    SESS_CANCELLED,
+    SESS_EXPIRED,
+}
 
 # ── Prompt ──
 PR_DRAFT = "draft"

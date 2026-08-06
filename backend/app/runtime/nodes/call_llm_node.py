@@ -16,6 +16,7 @@ from langgraph.config import get_stream_writer
 from app.core.config.llm_settings import llm_settings
 from app.runtime.llm.client import llm_client
 from app.runtime.schemas.trace_schema import TraceCreate
+from app.runtime.execution_control import raise_if_cancelled
 from app.runtime.services.trace_service import trace_service
 from app.runtime.state import RuntimeGraphState
 from app.utils.ids import new_span_id
@@ -44,6 +45,7 @@ def call_llm_node(state: RuntimeGraphState) -> RuntimeGraphState:
     prompt = state.get("prompt")
     prompt_fallback = state.get("prompt_fallback", False)
     requested_prompt_code = state.get("prompt_code")
+    raise_if_cancelled(session_id)
 
     # ── 记录上下文 Tool Span（历史消息查询视为一次 Tool 调用） ──
     tool_start = perf_counter()
@@ -74,6 +76,7 @@ def call_llm_node(state: RuntimeGraphState) -> RuntimeGraphState:
 
     if writer is not None:
         def on_chunk(text: str) -> None:
+            raise_if_cancelled(session_id)
             writer({
                 "kind": "llm_token",
                 "token": text,

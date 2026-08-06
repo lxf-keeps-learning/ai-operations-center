@@ -75,13 +75,13 @@ onMounted(async () => {
 
 <style scoped>
 .dashboard h1 {
-  color: var(--color-heading);
+  color: var(--theme-heading);
   font-size: 26px;
   margin: 0 0 4px;
 }
 
 .dashboard__subtitle {
-  color: var(--color-text-muted);
+  color: var(--theme-muted);
   font-size: 14px;
   margin: 0 0 24px;
 }
@@ -93,10 +93,10 @@ onMounted(async () => {
 }
 
 .dashboard__error {
-  background: #fef2f2;
+  background: var(--theme-danger-soft, #fef2f2);
   border: 1px solid #fecaca;
   border-radius: 8px;
-  color: #b91c1c;
+  color: var(--theme-danger-text, #b91c1c);
   padding: 12px 16px;
 }
 
@@ -108,14 +108,14 @@ onMounted(async () => {
 }
 
 .summary-card {
-  background: #ffffff;
+  background: var(--theme-panel-solid);
   border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 20px;
 }
 
 .summary-card span {
-  color: var(--color-text-muted);
+  color: var(--theme-muted);
   display: block;
   font-size: 12px;
   font-weight: 800;
@@ -124,7 +124,7 @@ onMounted(async () => {
 }
 
 .summary-card strong {
-  color: var(--color-heading);
+  color: var(--theme-heading);
   font-size: 22px;
 }
 
@@ -138,7 +138,7 @@ onMounted(async () => {
 }
 
 .infra-card {
-  background: #ffffff;
+  background: var(--theme-panel-solid);
   border: 1px solid var(--color-border);
   border-radius: 8px;
   cursor: pointer;
@@ -149,17 +149,17 @@ onMounted(async () => {
 }
 
 .infra-card:hover {
-  border-color: #6366f1;
+  border-color: var(--theme-accent);
 }
 
 .infra-card h3 {
-  color: var(--color-heading);
+  color: var(--theme-heading);
   font-size: 18px;
   margin: 0 0 8px;
 }
 
 .infra-card p {
-  color: var(--color-text-muted);
+  color: var(--theme-muted);
   font-size: 14px;
   line-height: 1.6;
   margin: 0;
