@@ -9,6 +9,7 @@ from app.models import SystemItem
 from app.runtime.models import AiConversation, AiSession, AiPrompt, AiTrace, AiFeedback
 from app.operation_agent.models import AnalysisEvent, OperationAnalysisRecord, OperationReportFile, OperationDownloadLog, OperationAiUsageRecord
 from app.report_chat_agent.models import ReportChatMessage, ReportChatSession
+from app.operation_inbox.models import OperationMessage
 from app.modules.prompt_center.infrastructure.models import PromptDefinition, PromptVersion, PromptVariable, PromptRelease, PromptTestCase, PromptTestRun, PromptEvaluation, PromptAuditLog
 from app.modules.evaluation_center.infrastructure.models import EvaluationResult, EvaluationMetric
 from app.modules.experiment_center.infrastructure.models import PromptExperiment, ExperimentResult
