@@ -1,0 +1,5 @@
+OP_AWAITING_REVIEW = "awaiting_review"
+OP_CLAIMED = "claimed"
+OP_RESOLVED = "resolved"
+OP_REOPENED = "reopened"
+OP_FAILED = "failed"
