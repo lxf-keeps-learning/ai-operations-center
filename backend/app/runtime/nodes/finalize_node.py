@@ -6,7 +6,8 @@ Graph 的最后一个节点，负责：
   2. 记录 runtime finish Span（标记全链路追踪的结束）
 """
 from app.runtime.schemas.session_schema import SessionUpdate
-from app.runtime.schemas.status import SESS_FAILED, SESS_SUCCESS
+from app.runtime.schemas.status import SESS_CANCELLED, SESS_FAILED, SESS_SUCCESS
+from app.runtime.execution_control import runtime_execution_registry
 from app.runtime.schemas.trace_schema import TraceCreate
 from app.runtime.services.session_service import session_service
 from app.runtime.services.trace_service import trace_service
@@ -22,6 +23,22 @@ def finalize_node(state: RuntimeGraphState) -> RuntimeGraphState:
     root_span_id = state["root_span_id"]
     llm_result = state["llm_result"]
     answer = state["answer"]
+    if llm_result.cancelled or runtime_execution_registry.is_cancel_requested(session_id):
+        session_service.update(db, session_id, SessionUpdate(status=SESS_CANCELLED))
+        trace_service.create(
+            db,
+            TraceCreate(
+                trace_id=trace_id,
+                span_id=new_span_id(),
+                parent_span_id=root_span_id,
+                session_id=session_id,
+                span_type="runtime",
+                input_data={"event": "session_cancelled"},
+                output_data={"status": SESS_CANCELLED},
+                status=SESS_CANCELLED,
+            ),
+        )
+        return state
 
     if llm_result.success:
         # LLM 调用成功：更新输出文本，标记 Session 为 success

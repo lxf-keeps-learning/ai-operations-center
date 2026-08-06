@@ -14,6 +14,7 @@ from app.runtime.schemas.conversation_schema import ConversationCreate
 from app.runtime.schemas.session_schema import SessionCreate
 from app.runtime.schemas.status import CONV_ACTIVE, CONV_CREATED, SESS_RUNNING
 from app.runtime.schemas.trace_schema import TraceCreate
+from app.runtime.execution_control import runtime_execution_registry
 from app.runtime.services.conversation_service import conversation_service
 from app.runtime.services.session_service import session_service
 from app.runtime.services.trace_service import trace_service
@@ -31,6 +32,7 @@ def init_session_node(state: RuntimeGraphState) -> RuntimeGraphState:
     message = state["message"]
     conversation_id = state.get("conversation_id")
     biz_type = state.get("biz_type")
+    retry_of_session_id = state.get("retry_of_session_id")
 
     # ── 校验或自动创建 Conversation ──
     conv = None
@@ -67,6 +69,7 @@ def init_session_node(state: RuntimeGraphState) -> RuntimeGraphState:
                 "biz_type": biz_type,
                 "prompt_code": state.get("prompt_code"),
                 "history_messages": len(history_messages),
+                "retry_of_session_id": retry_of_session_id,
             },
             status=SESS_RUNNING,
         ),
@@ -118,5 +121,6 @@ def init_session_node(state: RuntimeGraphState) -> RuntimeGraphState:
     state["trace_id"] = trace_id
     state["root_span_id"] = root_span_id
     state["graph_span_id"] = graph_span_id
+    runtime_execution_registry.register(sess.id, trace_id)
 
     return state

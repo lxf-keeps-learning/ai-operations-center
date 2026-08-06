@@ -2,6 +2,8 @@
 import { ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
+import ThemeToggle from '@/components/ThemeToggle.vue'
+
 const infraOpen = ref(false)
 const operationOpen = ref(false)
 
@@ -14,7 +16,7 @@ function toggleOperation() {
 }
 
 const infraLinks = [
-  { to: '/infra', label: '控制台' },
+  { to: '/platform', label: 'Agent 控制台' },
   { to: '/infra/config', label: '配置中心' },
   { to: '/infra/models', label: '模型配置' },
   { to: '/infra/logs', label: '日志中心' },
@@ -67,6 +69,7 @@ const infraLinks = [
           </div>
         </div>
       </nav>
+      <ThemeToggle />
     </header>
 
     <main class="app-main">
@@ -82,7 +85,7 @@ const infraLinks = [
 
 .app-header {
   align-items: center;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--theme-sidebar);
   border-bottom: 1px solid var(--color-border);
   display: flex;
   justify-content: space-between;
@@ -95,7 +98,7 @@ const infraLinks = [
 
 .brand {
   align-items: center;
-  color: var(--color-text);
+  color: var(--theme-text);
   display: inline-flex;
   gap: 12px;
   text-decoration: none;
@@ -103,9 +106,9 @@ const infraLinks = [
 
 .brand__mark {
   align-items: center;
-  background: #0f172a;
+  background: var(--theme-gradient);
   border-radius: 8px;
-  color: #f8fafc;
+  color: var(--theme-accent-contrast);
   display: inline-flex;
   font-size: 14px;
   font-weight: 800;
@@ -142,8 +145,8 @@ const infraLinks = [
 }
 
 .app-nav > a.router-link-active {
-  background: #eef2ff;
-  color: #3730a3;
+  background: var(--theme-accent-soft);
+  color: var(--theme-accent-strong);
 }
 
 .nav-dropdown {
@@ -163,7 +166,7 @@ const infraLinks = [
 }
 
 .nav-dropdown__trigger:hover {
-  background: #f1f5f9;
+  background: var(--theme-accent-soft);
 }
 
 .nav-dropdown__arrow {
@@ -172,7 +175,7 @@ const infraLinks = [
 }
 
 .nav-dropdown__menu {
-  background: #ffffff;
+  background: var(--theme-panel-solid);
   border: 1px solid var(--color-border);
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
@@ -196,12 +199,12 @@ const infraLinks = [
 }
 
 .nav-dropdown__item:hover {
-  background: #f1f5f9;
+  background: var(--theme-accent-soft);
 }
 
 .nav-dropdown__item.router-link-active {
-  background: #eef2ff;
-  color: #3730a3;
+  background: var(--theme-accent-soft);
+  color: var(--theme-accent-strong);
 }
 
 .app-main {

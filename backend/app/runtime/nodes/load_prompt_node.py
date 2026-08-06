@@ -12,6 +12,7 @@ load_prompt — Prompt 加载节点。
 from time import perf_counter
 
 from app.runtime.schemas.trace_schema import TraceCreate
+from app.runtime.execution_control import raise_if_cancelled
 from app.runtime.services.prompt_service import prompt_service
 from app.runtime.services.trace_service import trace_service
 from app.runtime.state import RuntimeGraphState
@@ -22,6 +23,7 @@ PROMPT_NODE_NAME = "load_active_prompt"
 
 def load_prompt_node(state: RuntimeGraphState) -> RuntimeGraphState:
     """加载 active Prompt，如未指定或未找到则降级为系统默认 Prompt。"""
+    raise_if_cancelled(state["session_id"])
     prompt_code = state.get("prompt_code")
     if not prompt_code:
         # 未指定 Prompt code，直接跳过，call_llm 会使用 LlmClient 的系统 Prompt

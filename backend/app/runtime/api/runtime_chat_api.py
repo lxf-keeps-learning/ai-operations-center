@@ -22,6 +22,7 @@ class RuntimeChatRequest(BaseModel):
     user_id: str = "anonymous"
     biz_type: str | None = None
     prompt_code: str | None = None
+    retry_of_session_id: str | None = None
     message: str = Field(min_length=1)
 
 
@@ -37,6 +38,7 @@ def runtime_chat(payload: RuntimeChatRequest, db: Session = Depends(get_db)) -> 
         conversation_id=payload.conversation_id,
         biz_type=payload.biz_type,
         prompt_code=payload.prompt_code,
+        retry_of_session_id=payload.retry_of_session_id,
     )
     return ApiResponse(data=result)
 
@@ -54,6 +56,7 @@ async def runtime_chat_stream(
             conversation_id=payload.conversation_id,
             biz_type=payload.biz_type,
             prompt_code=payload.prompt_code,
+            retry_of_session_id=payload.retry_of_session_id,
         ):
             yield event
 

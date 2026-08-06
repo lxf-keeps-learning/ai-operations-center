@@ -75,6 +75,9 @@ class RuntimeEventAdapter:
         if self._final_state is None:
             return None
         fs = self._final_state
+        llm_result = fs.get("llm_result")
+        if getattr(llm_result, "cancelled", False):
+            return ("message_cancelled", {"session_id": fs.get("session_id", "")})
         conv = fs.get("conversation")
         return (
             "message_completed",

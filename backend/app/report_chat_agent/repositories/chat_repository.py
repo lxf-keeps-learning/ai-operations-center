@@ -114,6 +114,21 @@ class ReportChatRepository:
     def get_session(self, db: Session, session_id: str) -> ReportChatSession | None:
         return db.get(ReportChatSession, session_id)
 
+    def list_recent_sessions(
+        self,
+        db: Session,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[ReportChatSession]:
+        stmt = (
+            select(ReportChatSession)
+            .order_by(ReportChatSession.updated_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        return list(db.scalars(stmt).all())
+
     def ensure_conversation(
         self,
         db: Session,

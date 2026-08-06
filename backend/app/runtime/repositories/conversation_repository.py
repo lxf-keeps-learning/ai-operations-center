@@ -27,6 +27,20 @@ class ConversationRepository:
     def get_by_id(self, db: Session, conversation_id: str) -> AiConversation | None:
         return db.get(AiConversation, conversation_id)
 
+    def list_recent(
+        self,
+        db: Session,
+        *,
+        user_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[AiConversation]:
+        stmt = select(AiConversation)
+        if user_id:
+            stmt = stmt.where(AiConversation.user_id == user_id)
+        stmt = stmt.order_by(AiConversation.updated_at.desc()).offset(offset).limit(limit)
+        return list(db.scalars(stmt).all())
+
     def update(self, db: Session, conversation_id: str, payload: ConversationUpdate) -> AiConversation | None:
         record = self.get_by_id(db, conversation_id)
         if record is None:

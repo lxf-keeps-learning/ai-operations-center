@@ -36,8 +36,8 @@ defineProps<{
 }
 
 .status-badge--success {
-  background: #ecfdf5;
-  color: #047857;
+  background: var(--theme-success-soft, #ecfdf5);
+  color: var(--theme-success-text, #047857);
 }
 
 .status-badge--success .status-badge__dot {
@@ -45,8 +45,8 @@ defineProps<{
 }
 
 .status-badge--warning {
-  background: #fffbeb;
-  color: #b45309;
+  background: var(--theme-warning-soft, #fffbeb);
+  color: var(--theme-warning-text, #b45309);
 }
 
 .status-badge--warning .status-badge__dot {
@@ -54,8 +54,8 @@ defineProps<{
 }
 
 .status-badge--danger {
-  background: #fef2f2;
-  color: #b91c1c;
+  background: var(--theme-danger-soft, #fef2f2);
+  color: var(--theme-danger-text, #b91c1c);
 }
 
 .status-badge--danger .status-badge__dot {
@@ -63,8 +63,8 @@ defineProps<{
 }
 
 .status-badge--info {
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: var(--theme-info-soft, #eff6ff);
+  color: var(--theme-info-text, #1d4ed8);
 }
 
 .status-badge--info .status-badge__dot {
@@ -72,8 +72,8 @@ defineProps<{
 }
 
 .status-badge--neutral {
-  background: #f8fafc;
-  color: #475569;
+  background: var(--theme-panel-soft);
+  color: var(--theme-muted);
 }
 
 .status-badge--neutral .status-badge__dot {

@@ -13,9 +13,16 @@ from typing import AsyncGenerator
 from sqlalchemy.orm import Session
 
 from app.observability import build_langsmith_config
+from app.runtime.execution_control import (
+    RuntimeCancelledError,
+    runtime_execution_registry,
+)
 from app.runtime.graph import runtime_graph
 from app.runtime.runtime_event_adapter import RuntimeEventAdapter
 from app.runtime.schemas.feedback_schema import FeedbackCreate
+from app.runtime.services.session_service import session_service
+from app.runtime.schemas.session_schema import SessionUpdate
+from app.runtime.schemas.status import SESS_CANCELLED
 from app.runtime.services.feedback_service import feedback_service
 from app.runtime.state import RuntimeGraphState
 from app.utils.ids import new_trace_id
@@ -39,6 +46,7 @@ class RuntimeService:
         conversation_id: str | None = None,
         biz_type: str | None = None,
         prompt_code: str | None = None,
+        retry_of_session_id: str | None = None,
     ) -> dict:
         """执行一次 AI 对话的完整流程
 
@@ -52,6 +60,7 @@ class RuntimeService:
             "conversation_id": conversation_id,
             "biz_type": biz_type,
             "prompt_code": prompt_code,
+            "retry_of_session_id": retry_of_session_id,
             "trace_id": trace_id,
         }
 
@@ -86,6 +95,7 @@ class RuntimeService:
         conversation_id: str | None = None,
         biz_type: str | None = None,
         prompt_code: str | None = None,
+        retry_of_session_id: str | None = None,
     ) -> AsyncGenerator[str, None]:
         """流式 AI 对话，以 SSE 格式逐 token 输出 LLM 回复。
 
@@ -100,6 +110,7 @@ class RuntimeService:
             "conversation_id": conversation_id,
             "biz_type": biz_type,
             "prompt_code": prompt_code,
+            "retry_of_session_id": retry_of_session_id,
             "trace_id": trace_id,
             "_streaming": True,
         }
@@ -130,9 +141,17 @@ class RuntimeService:
             if completed:
                 yield to_sse(*completed)
 
+        except RuntimeCancelledError:
+            session_id = runtime_execution_registry.session_for_trace(trace_id)
+            if session_id:
+                session_service.update(db, session_id, SessionUpdate(status=SESS_CANCELLED))
+            yield to_sse("message_cancelled", {"session_id": session_id or ""})
         except Exception as exc:
             yield to_sse(*adapter.get_failed_event(str(exc)))
         finally:
+            session_id = runtime_execution_registry.session_for_trace(trace_id)
+            if session_id:
+                runtime_execution_registry.unregister(session_id)
             yield to_sse(*adapter.get_closed_event())
 
     def submit_feedback(self, db: Session, payload: FeedbackCreate) -> dict:

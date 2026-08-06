@@ -1,7 +1,162 @@
 :root {
-  --color-heading: #0f172a;
-  --color-text: #1e293b;
-  --color-text-muted: #64748b;
-  --color-border: #e2e8f0;
-  --color-border-strong: #cbd5e1;
+  --theme-page: #f5f7ff;
+  --theme-page-accent: #eef8ff;
+  --theme-sidebar: rgba(255, 255, 255, 0.9);
+  --theme-panel: rgba(255, 255, 255, 0.88);
+  --theme-panel-solid: #ffffff;
+  --theme-panel-soft: #f7f8ff;
+  --theme-text: #1b2540;
+  --theme-heading: #111a35;
+  --theme-muted: #697491;
+  --theme-border: rgba(126, 139, 184, 0.24);
+  --theme-border-strong: rgba(99, 102, 241, 0.34);
+  --theme-accent: #6657f5;
+  --theme-accent-strong: #5045dc;
+  --theme-accent-soft: #eeebff;
+  --theme-accent-contrast: #ffffff;
+  --theme-gradient: linear-gradient(135deg, #6657f5 0%, #2bc8d8 52%, #ff7ab8 100%);
+  --theme-gradient-soft: linear-gradient(135deg, #f0edff 0%, #e8fbff 52%, #fff0f7 100%);
+  --theme-shadow: 0 16px 44px rgba(91, 83, 190, 0.14);
+  --theme-shadow-soft: 0 8px 24px rgba(75, 88, 142, 0.1);
+  --theme-focus: rgba(102, 87, 245, 0.3);
+  --theme-code: #17203a;
+  --theme-success-soft: #ecfdf5;
+  --theme-success-text: #047857;
+  --theme-warning-soft: #fffbeb;
+  --theme-warning-text: #b45309;
+  --theme-danger-soft: #fef2f2;
+  --theme-danger-text: #b91c1c;
+  --theme-info-soft: #eff6ff;
+  --theme-info-text: #1d4ed8;
+
+  --color-heading: var(--theme-heading);
+  --color-text: var(--theme-text);
+  --color-text-muted: var(--theme-muted);
+  --color-border: var(--theme-border);
+  --color-border-strong: var(--theme-border-strong);
+}
+
+:root[data-theme='deep-night'] {
+  --theme-page: #050b1c;
+  --theme-page-accent: #08132b;
+  --theme-sidebar: #040a1a;
+  --theme-panel: #091229;
+  --theme-panel-solid: #091229;
+  --theme-panel-soft: #0d1730;
+  --theme-text: #e8eefc;
+  --theme-heading: #f4f7ff;
+  --theme-muted: #7e8ca8;
+  --theme-border: rgba(148, 163, 184, 0.2);
+  --theme-border-strong: rgba(119, 128, 255, 0.52);
+  --theme-accent: #7780ff;
+  --theme-accent-strong: #9fa6ff;
+  --theme-accent-soft: #1e2b51;
+  --theme-accent-contrast: #081027;
+  --theme-gradient: linear-gradient(135deg, #8d94ff, #43d3e5);
+  --theme-gradient-soft: linear-gradient(135deg, #172147, #102842);
+  --theme-shadow: 0 16px 44px rgba(0, 0, 0, 0.28);
+  --theme-shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.2);
+  --theme-focus: rgba(119, 128, 255, 0.42);
+  --theme-code: #0f172a;
+  --theme-success-soft: rgba(16, 185, 129, 0.16);
+  --theme-success-text: #6ee7b7;
+  --theme-warning-soft: rgba(245, 158, 11, 0.16);
+  --theme-warning-text: #fcd34d;
+  --theme-danger-soft: rgba(239, 68, 68, 0.16);
+  --theme-danger-text: #fca5a5;
+  --theme-info-soft: rgba(59, 130, 246, 0.16);
+  --theme-info-text: #93c5fd;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--theme-page);
+  color: var(--theme-text);
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  text-rendering: optimizeLegibility;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+body {
+  background:
+    radial-gradient(circle at 86% 2%, color-mix(in srgb, var(--theme-accent) 10%, transparent), transparent 28rem),
+    var(--theme-page);
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+/* Legacy pages contain a few local white-surface declarations. Keep them
+   coherent when the shared deep theme is selected without changing their
+   existing component contracts. */
+:root[data-theme='deep-night'] .app-main,
+:root[data-theme='deep-night'] .platform-legacy-surface {
+  color: var(--theme-text);
+}
+
+:root[data-theme='deep-night'] .app-main [class*='card'],
+:root[data-theme='deep-night'] .app-main [class*='panel'],
+:root[data-theme='deep-night'] .app-main [class*='table'],
+:root[data-theme='deep-night'] .app-main [class*='surface'],
+:root[data-theme='deep-night'] .platform-legacy-surface [class*='card'],
+:root[data-theme='deep-night'] .platform-legacy-surface [class*='panel'],
+:root[data-theme='deep-night'] .platform-legacy-surface [class*='table'],
+:root[data-theme='deep-night'] .platform-legacy-surface [class*='surface'] {
+  background-color: var(--theme-panel-solid) !important;
+  border-color: var(--theme-border) !important;
+  color: var(--theme-text);
+}
+
+:root[data-theme='deep-night'] .app-main input,
+:root[data-theme='deep-night'] .app-main textarea,
+:root[data-theme='deep-night'] .app-main select,
+:root[data-theme='deep-night'] .platform-legacy-surface input,
+:root[data-theme='deep-night'] .platform-legacy-surface textarea,
+:root[data-theme='deep-night'] .platform-legacy-surface select {
+  background: var(--theme-panel-soft);
+  border-color: var(--theme-border);
+  color: var(--theme-text);
+}
+
+/* The platform detail pages predate the shared palette and use deep-night
+   literals. Re-map their structural surfaces for the default vivid theme. */
+:root:not([data-theme='deep-night']) .platform-content [class*='card'],
+:root:not([data-theme='deep-night']) .platform-content [class*='section'],
+:root:not([data-theme='deep-night']) .platform-content [class*='summary'],
+:root:not([data-theme='deep-night']) .platform-content [class*='row'],
+:root:not([data-theme='deep-night']) .platform-content [class*='panel'],
+:root:not([data-theme='deep-night']) .platform-content [class*='tabs'] {
+  background-color: var(--theme-panel-solid) !important;
+  border-color: var(--theme-border) !important;
+}
+
+:root:not([data-theme='deep-night']) .platform-content [class*='node'] {
+  background: var(--theme-gradient-soft) !important;
+  border-color: var(--theme-border-strong) !important;
+}
+
+:root:not([data-theme='deep-night']) .platform-content h1,
+:root:not([data-theme='deep-night']) .platform-content h2,
+:root:not([data-theme='deep-night']) .platform-content h3,
+:root:not([data-theme='deep-night']) .platform-content strong {
+  color: var(--theme-heading) !important;
+}
+
+:root:not([data-theme='deep-night']) .platform-content p,
+:root:not([data-theme='deep-night']) .platform-content small,
+:root:not([data-theme='deep-night']) .platform-content [class*='meta'],
+:root:not([data-theme='deep-night']) .platform-content [class*='subtitle'] {
+  color: var(--theme-muted) !important;
 }

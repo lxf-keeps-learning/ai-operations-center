@@ -5,7 +5,7 @@ Trace 记录一次请求从 API → Service → Graph → Tool → LLM 的完整
 每个 Span 代表链路中的一个环节，通过 trace_id + parent_span_id 串联。
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -14,6 +14,24 @@ from app.runtime.services.trace_service import trace_service
 from app.core.schema.response_schema import ApiResponse
 
 router = APIRouter()
+
+
+@router.get("/runtime/traces", response_model=ApiResponse[list[TraceResponse]])
+def list_traces(
+    graph_name: str | None = Query(default=None),
+    span_type: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> ApiResponse[list[TraceResponse]]:
+    result = trace_service.list_recent(
+        db,
+        graph_name=graph_name,
+        span_type=span_type,
+        limit=page_size,
+        offset=(page - 1) * page_size,
+    )
+    return ApiResponse(data=result)
 
 
 @router.post("/runtime/traces", response_model=ApiResponse[TraceResponse], status_code=201)

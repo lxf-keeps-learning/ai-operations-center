@@ -37,6 +37,16 @@ class AnalysisRecordRepository:
         )
         return db.scalar(stmt)
 
+    def list_events(self, db: Session, run_id: str) -> list:
+        from app.operation_agent.models.analysis_event_model import AnalysisEvent
+
+        stmt = (
+            select(AnalysisEvent)
+            .where(AnalysisEvent.run_id == run_id)
+            .order_by(AnalysisEvent.sequence.asc())
+        )
+        return list(db.scalars(stmt).all())
+
     def list_recent(
         self,
         db: Session,

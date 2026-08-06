@@ -37,7 +37,7 @@ defineEmits<{
 
 <style scoped>
 .data-table-wrapper {
-  background: #ffffff;
+  background: var(--theme-panel-solid);
   border: 1px solid var(--color-border);
   border-radius: 8px;
   overflow: hidden;
@@ -58,14 +58,14 @@ defineEmits<{
 
 .data-table th,
 .data-table td {
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--theme-border);
   font-size: 14px;
   padding: 12px 16px;
   text-align: left;
 }
 
 .data-table th {
-  background: #f8fafc;
+  background: var(--theme-panel-soft);
   color: var(--color-text-muted);
   font-size: 12px;
   font-weight: 800;
@@ -74,7 +74,7 @@ defineEmits<{
 }
 
 .data-table tbody tr:hover {
-  background: #f8fafc;
+  background: var(--theme-panel-soft);
 }
 
 .data-table tbody tr:last-child td {

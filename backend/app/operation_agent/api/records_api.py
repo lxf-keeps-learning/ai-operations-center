@@ -8,8 +8,174 @@ from sqlalchemy.orm import Session
 from app.core.schema.response_schema import ApiResponse
 from app.db.session import get_db
 from app.operation_agent.repositories.analysis_record_repo import analysis_record_repo
+from app.report_chat_agent.repositories import report_chat_repo
+from app.report_chat_agent.models import ReportChatMessage
+from app.runtime.models.trace_model import AiTrace
+from sqlalchemy import select
 
 router = APIRouter()
+
+
+def _event_out(event: object) -> dict:
+    return {
+        "id": getattr(event, "event_id", ""),
+        "sequence": getattr(event, "sequence", 0),
+        "event_type": getattr(event, "event_type", ""),
+        "node_key": getattr(event, "node_key", None),
+        "node_name": getattr(event, "node_name", None),
+        "status": getattr(event, "status", None),
+        "message": getattr(event, "message", None),
+        "duration_ms": getattr(event, "duration_ms", None),
+        "source_label": getattr(event, "source_label", None),
+        "payload": getattr(event, "payload_json", None),
+        "error_code": getattr(event, "error_code", None),
+        "error_message": getattr(event, "error_message", None),
+        "timestamp": getattr(event, "event_timestamp", None),
+    }
+
+
+def _trace_out(trace: AiTrace) -> dict:
+    return {
+        "id": trace.id,
+        "trace_id": trace.trace_id,
+        "span_id": trace.span_id,
+        "parent_span_id": trace.parent_span_id,
+        "session_id": trace.session_id,
+        "span_type": trace.span_type,
+        "graph_name": trace.graph_name,
+        "node_name": trace.node_name,
+        "tool_name": trace.tool_name,
+        "model_name": trace.model_name,
+        "prompt_code": trace.prompt_code,
+        "prompt_version": trace.prompt_version,
+        "input_data": trace.input_data,
+        "output_data": trace.output_data,
+        "cost_ms": trace.cost_ms,
+        "prompt_tokens": trace.prompt_tokens,
+        "completion_tokens": trace.completion_tokens,
+        "total_tokens": trace.total_tokens,
+        "status": trace.status,
+        "error_message": trace.error_message,
+        "created_at": trace.created_at.isoformat() if trace.created_at else None,
+    }
+
+
+@router.get("/operation/graph-runs", response_model=ApiResponse[list[dict]])
+def list_graph_runs(
+    graph_type: str | None = Query(default=None, pattern="^(report_generation|report_chat)$"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> ApiResponse[list[dict]]:
+    runs: list[dict] = []
+    if graph_type in (None, "report_generation"):
+        for record in analysis_record_repo.list_recent(db, limit=page_size * 2):
+            runs.append({
+                "run_id": str(record.id),
+                "graph_type": "report_generation",
+                "graph_name": "ioc_operation_analysis_graph",
+                "title": record.report_name or "运营分析报告",
+                "status": record.status,
+                "trace_id": record.trace_id,
+                "session_id": None,
+                "summary": record.summary_text,
+                "created_at": record.created_at.isoformat() if record.created_at else None,
+            })
+    if graph_type in (None, "report_chat"):
+        for session in report_chat_repo.list_recent_sessions(db, limit=page_size * 2):
+            latest_message = db.scalar(
+                select(ReportChatMessage)
+                .where(ReportChatMessage.session_id == session.id)
+                .order_by(ReportChatMessage.created_at.desc())
+                .limit(1)
+            )
+            runs.append({
+                "run_id": session.id,
+                "graph_type": "report_chat",
+                "graph_name": "ioc_report_chat_graph",
+                "title": session.title,
+                "status": session.status,
+                "trace_id": latest_message.trace_id if latest_message else None,
+                "session_id": session.id,
+                "summary": latest_message.content if latest_message else None,
+                "created_at": session.updated_at.isoformat() if session.updated_at else None,
+            })
+    runs.sort(key=lambda item: item.get("created_at") or "", reverse=True)
+    start = (page - 1) * page_size
+    return ApiResponse(data=runs[start : start + page_size])
+
+
+@router.get("/operation/graph-runs/{graph_type}/{run_id}", response_model=ApiResponse[dict])
+def get_graph_run_detail(
+    graph_type: str,
+    run_id: str,
+    db: Session = Depends(get_db),
+) -> ApiResponse[dict]:
+    if graph_type == "report_generation":
+        record = analysis_record_repo.get_by_id(db, int(run_id))
+        if record is None:
+            return ApiResponse(code=404001, message="报告生成记录不存在")
+        return ApiResponse(data={
+            "run_id": run_id,
+            "graph_type": graph_type,
+            "graph_name": "ioc_operation_analysis_graph",
+            "title": record.report_name or "运营分析报告",
+            "status": record.status,
+            "trace_id": record.trace_id,
+            "created_at": record.created_at.isoformat() if record.created_at else None,
+            "input": record.input_snapshot_json,
+            "output": {
+                "summary": record.summary_text,
+                "report": record.final_answer_markdown,
+                "abnormal_items": record.abnormal_items_json,
+                "risk_items": record.risk_items_json,
+                "advice_items": record.advice_items_json,
+                "evidence": record.evidence_json,
+            },
+            "events": [_event_out(event) for event in analysis_record_repo.list_events(db, record.trace_id)],
+            "traces": [],
+        })
+
+    if graph_type == "report_chat":
+        session = report_chat_repo.get_session(db, run_id)
+        if session is None:
+            return ApiResponse(code=404001, message="报告追问记录不存在")
+        messages = report_chat_repo.list_messages(db, run_id)
+        trace_ids = {message.trace_id for message in messages if message.trace_id}
+        traces: list[AiTrace] = []
+        for trace_id in trace_ids:
+            traces.extend(db.scalars(select(AiTrace).where(AiTrace.trace_id == trace_id)).all())
+        return ApiResponse(data={
+            "run_id": run_id,
+            "graph_type": graph_type,
+            "graph_name": "ioc_report_chat_graph",
+            "title": session.title,
+            "status": session.status,
+            "trace_id": next(iter(trace_ids), None),
+            "created_at": session.updated_at.isoformat() if session.updated_at else None,
+            "input": {"report_id": session.report_id, "user_id": session.user_id},
+            "output": {"message_count": len(messages)},
+            "events": [{
+                "id": message.id,
+                "sequence": index + 1,
+                "event_type": "user_question" if message.role == "user" else "assistant_answer",
+                "node_name": "报告追问",
+                "status": "success",
+                "message": message.content,
+                "timestamp": message.created_at.isoformat() if message.created_at else None,
+                "payload": {
+                    "runtime_session_id": message.runtime_session_id,
+                    "question_scope": message.question_scope,
+                    "answer_type": message.answer_type,
+                    "evidence_refs": message.evidence_refs,
+                    "query_scope": message.query_scope,
+                    "trace_id": message.trace_id,
+                },
+            } for index, message in enumerate(messages)],
+            "traces": [_trace_out(trace) for trace in traces],
+        })
+
+    return ApiResponse(code=400001, message="不支持的 Graph 类型")
 
 
 class AnalysisRecordOut(BaseModel):

@@ -31,6 +31,31 @@ class SessionRepository:
     def get_by_id(self, db: Session, session_id: str) -> AiSession | None:
         return db.get(AiSession, session_id)
 
+    def list_recent(
+        self,
+        db: Session,
+        *,
+        status: str | None = None,
+        task_type: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[AiSession]:
+        stmt = select(AiSession)
+        if status:
+            stmt = stmt.where(AiSession.status == status)
+        if task_type:
+            stmt = stmt.where(AiSession.task_type == task_type)
+        stmt = stmt.order_by(AiSession.created_at.desc()).offset(offset).limit(limit)
+        return list(db.scalars(stmt).all())
+
+    def list_by_conversation(self, db: Session, conversation_id: str) -> list[AiSession]:
+        stmt = (
+            select(AiSession)
+            .where(AiSession.conversation_id == conversation_id)
+            .order_by(AiSession.created_at.asc())
+        )
+        return list(db.scalars(stmt).all())
+
     def list_recent_success_by_conversation(
         self,
         db: Session,

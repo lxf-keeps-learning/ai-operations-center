@@ -74,6 +74,23 @@ class PromptRepository:
         )
         return list(db.scalars(stmt).all())
 
+    def list_recent(
+        self,
+        db: Session,
+        *,
+        status: str | None = None,
+        scene_code: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[AiPrompt]:
+        stmt = select(AiPrompt)
+        if status:
+            stmt = stmt.where(AiPrompt.status == status)
+        if scene_code:
+            stmt = stmt.where(AiPrompt.scene_code == scene_code)
+        stmt = stmt.order_by(AiPrompt.code.asc(), AiPrompt.version.desc()).offset(offset).limit(limit)
+        return list(db.scalars(stmt).all())
+
     def _max_version_by_code(self, db: Session, code: str) -> int:
         """获取指定 code 的最大版本号，用于新版本自增"""
         stmt = select(AiPrompt.version).where(AiPrompt.code == code).order_by(AiPrompt.version.desc()).limit(1)
