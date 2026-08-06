@@ -15,6 +15,7 @@ from app.operation_agent.api import router as operation_router
 from app.operation_agent.api.records_api import router as operation_records_router
 from app.report_chat_agent.api.chat_api import router as report_chat_router
 from app.operation_inbox.api import router as operation_inbox_router
+from app.platform.api import router as platform_router
 from app.skills.api import router as skills_router
 from app.tools.api import router as tools_router
 from app.tools.register import register_all_tools
@@ -61,6 +62,7 @@ def create_app() -> FastAPI:
     app.include_router(operation_records_router, prefix=settings.api_v1_prefix)
     app.include_router(report_chat_router, prefix=settings.api_v1_prefix)
     app.include_router(operation_inbox_router, prefix=settings.api_v1_prefix)
+    app.include_router(platform_router, prefix=settings.api_v1_prefix)
     app.include_router(skills_router, prefix=settings.api_v1_prefix)
     app.include_router(cache.router, prefix="/api/cache", tags=["Cache"])
     app.include_router(items.router, prefix=f"{settings.api_v1_prefix}/items", tags=["Items"])
