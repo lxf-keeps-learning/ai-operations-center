@@ -5,6 +5,8 @@ Session 代表一次 AI 对话或分析任务的执行记录。
 提供创建、查询、更新状态、更新输出等操作。
 """
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
@@ -22,16 +24,22 @@ router = APIRouter()
 
 @router.get("/runtime/sessions", response_model=ApiResponse[list[SessionResponse]])
 def list_sessions(
+    session_id: str | None = Query(default=None),
     status: str | None = Query(default=None),
     task_type: str | None = Query(default=None),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> ApiResponse[list[SessionResponse]]:
     result = session_service.list_recent(
         db,
+        session_id=session_id,
         status=status,
         task_type=task_type,
+        date_from=date_from,
+        date_to=date_to,
         limit=page_size,
         offset=(page - 1) * page_size,
     )

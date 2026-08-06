@@ -1,6 +1,6 @@
 """SessionRepository — 运行记录数据访问层"""
 
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -35,16 +35,25 @@ class SessionRepository:
         self,
         db: Session,
         *,
+        session_id: str | None = None,
         status: str | None = None,
         task_type: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[AiSession]:
         stmt = select(AiSession)
+        if session_id:
+            stmt = stmt.where(AiSession.id == session_id)
         if status:
             stmt = stmt.where(AiSession.status == status)
         if task_type:
             stmt = stmt.where(AiSession.task_type == task_type)
+        if date_from:
+            stmt = stmt.where(AiSession.created_at >= datetime.combine(date_from, time.min))
+        if date_to:
+            stmt = stmt.where(AiSession.created_at < datetime.combine(date_to + timedelta(days=1), time.min))
         stmt = stmt.order_by(AiSession.created_at.desc()).offset(offset).limit(limit)
         return list(db.scalars(stmt).all())
 

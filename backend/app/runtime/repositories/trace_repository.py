@@ -85,12 +85,18 @@ class TraceRepository:
         self,
         db: Session,
         *,
+        session_id: str | None = None,
+        trace_id: str | None = None,
         graph_name: str | None = None,
         span_type: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[AiTrace]:
         stmt = select(AiTrace)
+        if session_id:
+            stmt = stmt.where(AiTrace.session_id == session_id)
+        if trace_id:
+            stmt = stmt.where(AiTrace.trace_id == trace_id)
         if graph_name:
             stmt = stmt.where(AiTrace.graph_name == graph_name)
         if span_type:
