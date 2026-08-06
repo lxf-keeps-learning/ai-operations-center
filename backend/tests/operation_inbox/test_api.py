@@ -57,6 +57,7 @@ def _create_message(
     status: str,
     priority: int = 0,
     report_id: int | None = None,
+    assignee_id: str | None = None,
 ) -> OperationMessage:
     db.add(AiSession(
         id=runtime_session_id,
@@ -73,6 +74,7 @@ def _create_message(
         status=status,
         priority=priority,
         report_id=report_id,
+        assignee_id=assignee_id,
         created_at=now_local(),
         updated_at=now_local(),
     )
@@ -126,6 +128,12 @@ def test_messages_api_envelopes_filtered_rows_and_summary(
             runtime_session_id="runtime_failed",
             status=OP_FAILED,
         )
+        _create_message(
+            db,
+            message_id="msg_processing",
+            runtime_session_id="runtime_processing",
+            status="processing",
+        )
 
     response = client.get(
         "/api/v1/operation/messages",
@@ -147,6 +155,8 @@ def test_messages_api_envelopes_filtered_rows_and_summary(
         OP_RESOLVED: 1,
         OP_REOPENED: 1,
         OP_FAILED: 1,
+        "processing": 1,
+        "mine": 0,
     }
 
 
@@ -201,6 +211,40 @@ def test_message_actions_reject_conflicts_and_allow_valid_lifecycle(
     assert reopened["data"]["status"] == OP_REOPENED
     assert retried["data"]["status"] == OP_AWAITING_REVIEW
     assert retried["data"]["retry_count"] == 1
+
+
+def test_message_summary_returns_unpaginated_mine_count_without_changing_global_counts(
+    api_db: tuple[TestClient, sessionmaker[Session]],
+) -> None:
+    """Removing the assignee/status count must make a second operator's claim leak into mine."""
+    client, session_local = api_db
+    with session_local() as db:
+        _create_message(
+            db,
+            message_id="msg_mine",
+            runtime_session_id="runtime_mine",
+            status=OP_CLAIMED,
+            assignee_id="operator_a",
+        )
+        _create_message(
+            db,
+            message_id="msg_other_operator",
+            runtime_session_id="runtime_other_operator",
+            status=OP_CLAIMED,
+            assignee_id="operator_b",
+        )
+        _create_message(
+            db,
+            message_id="msg_resolved_by_mine",
+            runtime_session_id="runtime_resolved_by_mine",
+            status=OP_RESOLVED,
+            assignee_id="operator_a",
+        )
+
+    payload = client.get("/api/v1/operation/messages/summary", params={"assignee_id": "operator_a"}).json()["data"]
+
+    assert payload[OP_CLAIMED] == 2
+    assert payload["mine"] == 1
 
 
 def test_operation_analysis_message_detail_and_claim_work_without_ai_session(

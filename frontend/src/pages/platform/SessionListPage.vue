@@ -17,6 +17,7 @@ function queryValue(key: string) {
 }
 
 const statusFilter = ref(queryValue('status'))
+const sessionFilter = ref(queryValue('session_id'))
 const dateFrom = ref(queryValue('date_from'))
 const dateTo = ref(queryValue('date_to'))
 const pageSize = ref(Number(queryValue('page_size')) || 50)
@@ -35,6 +36,7 @@ async function loadSessions() {
   error.value = ''
   try {
     sessions.value = await listRuntimeSessions({
+      session_id: sessionFilter.value || undefined,
       status: statusFilter.value || undefined,
       date_from: dateFrom.value || undefined,
       date_to: dateTo.value || undefined,
@@ -49,6 +51,7 @@ async function loadSessions() {
 
 function resetFilters() {
   statusFilter.value = ''
+  sessionFilter.value = ''
   dateFrom.value = ''
   dateTo.value = ''
   pageSize.value = 50
@@ -114,6 +117,7 @@ function retrySession(session: RuntimeSession) {
     </div>
 
     <form class="runtime-filters" @submit.prevent="loadSessions">
+      <label>Session<input v-model="sessionFilter" placeholder="Session ID" /></label>
       <label>状态<select v-model="statusFilter"><option value="">全部</option><option value="running">运行中</option><option value="success">已完成</option><option value="failed">失败</option><option value="cancelled">已取消</option></select></label>
       <label>开始日期<input v-model="dateFrom" type="date" /></label>
       <label>结束日期<input v-model="dateTo" type="date" /></label>

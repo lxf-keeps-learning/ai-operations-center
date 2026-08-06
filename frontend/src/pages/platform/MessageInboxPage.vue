@@ -18,7 +18,7 @@ import {
 const operatorId = 'operator_local'
 const activeTab = ref<OperationMessageTab>('pending')
 const messages = ref<OperationMessage[]>([])
-const summary = ref<OperationMessageSummary>({ awaiting_review: 0, claimed: 0, reopened: 0, resolved: 0, failed: 0, processing: 0 })
+const summary = ref<OperationMessageSummary>({ awaiting_review: 0, claimed: 0, reopened: 0, resolved: 0, failed: 0, processing: 0, mine: 0 })
 const selected = ref<OperationMessage | null>(null)
 const resolutionNote = ref('')
 const loading = ref(false)
@@ -38,7 +38,7 @@ const activeTabLabel = computed(() => tabs.find((tab) => tab.key === activeTab.v
 
 function tabCount(tab: OperationMessageTab) {
   if (tab === 'pending') return summary.value.awaiting_review + summary.value.reopened
-  return summary.value[tab === 'mine' ? 'claimed' : tab]
+  return tab === 'mine' ? summary.value.mine : summary.value[tab]
 }
 
 function formatTime(value: string | null) {
@@ -57,7 +57,10 @@ async function loadMessages() {
       ? Promise.all([listOperationMessages({ status: 'awaiting_review' }), listOperationMessages({ status: 'reopened' })])
         .then(([awaitingReview, reopened]) => [...awaitingReview, ...reopened])
       : listOperationMessages({ status: activeTab.value, assignee_id: activeTab.value === 'mine' ? operatorId : undefined })
-    const [items, counts] = await Promise.all([itemsPromise, getOperationMessageSummary()])
+    const [items, counts] = await Promise.all([
+      itemsPromise,
+      getOperationMessageSummary({ assignee_id: operatorId }),
+    ])
     messages.value = items.sort((left, right) => right.priority - left.priority || (left.created_at || '').localeCompare(right.created_at || ''))
     summary.value = counts
     if (selected.value) selected.value = messages.value.find((item) => item.id === selected.value?.id) || selected.value

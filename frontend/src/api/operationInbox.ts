@@ -52,6 +52,7 @@ export interface OperationMessageSummary {
   resolved: number
   failed: number
   processing: number
+  mine: number
 }
 
 export async function listOperationMessages(params: OperationMessageListParams = {}) {
@@ -62,8 +63,10 @@ export async function listOperationMessages(params: OperationMessageListParams =
   return request<OperationMessage[]>(`/operation/messages${query.toString() ? `?${query}` : ''}`)
 }
 
-export function getOperationMessageSummary() {
-  return request<OperationMessageSummary>('/operation/messages/summary')
+export function getOperationMessageSummary(params: { assignee_id?: string } = {}) {
+  const query = new URLSearchParams()
+  if (params.assignee_id) query.set('assignee_id', params.assignee_id)
+  return request<OperationMessageSummary>(`/operation/messages/summary${query.toString() ? `?${query}` : ''}`)
 }
 
 function operatorActionPayload(payload: OperationMessageActionRequest | string): OperationMessageActionRequest {

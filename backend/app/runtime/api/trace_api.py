@@ -18,6 +18,8 @@ router = APIRouter()
 
 @router.get("/runtime/traces", response_model=ApiResponse[list[TraceResponse]])
 def list_traces(
+    session_id: str | None = Query(default=None),
+    trace_id: str | None = Query(default=None),
     graph_name: str | None = Query(default=None),
     span_type: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
@@ -26,6 +28,8 @@ def list_traces(
 ) -> ApiResponse[list[TraceResponse]]:
     result = trace_service.list_recent(
         db,
+        session_id=session_id,
+        trace_id=trace_id,
         graph_name=graph_name,
         span_type=span_type,
         limit=page_size,

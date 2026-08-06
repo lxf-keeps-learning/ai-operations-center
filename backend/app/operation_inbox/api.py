@@ -65,8 +65,11 @@ def list_messages(
 
 
 @router.get("/operation/messages/summary")
-def message_summary(db: Session = Depends(get_db)) -> ApiResponse[dict[str, int]]:
-    return ApiResponse(data=operation_inbox_repo.summary(db))
+def message_summary(
+    assignee_id: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> ApiResponse[dict[str, int]]:
+    return ApiResponse(data=operation_inbox_repo.summary(db, assignee_id=assignee_id))
 
 
 @router.get("/operation/messages/{message_id}")

@@ -134,6 +134,7 @@ export function createRuntimeConversation(payload: { user_id?: string; title?: s
 }
 
 export interface RuntimeSessionListParams {
+  session_id?: string
   status?: string
   task_type?: string
   date_from?: string
@@ -153,6 +154,7 @@ export interface RuntimeTraceListParams {
   graph_name?: string
   span_type?: string
   session_id?: string
+  trace_id?: string
   page_size?: number
 }
 

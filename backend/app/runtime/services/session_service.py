@@ -6,6 +6,8 @@ Session 也承担了"消息"的职责：通过 list_recent_messages 将历史 Se
 拼接为 user/assistant 格式的消息列表，供 LLM 上下文使用。
 """
 
+from datetime import date
+
 from sqlalchemy.orm import Session
 
 from app.runtime.repositories.session_repository import SessionRepository
@@ -28,8 +30,28 @@ class SessionService:
             return None
         return SessionResponse.model_validate(record)
 
-    def list_recent(self, db: Session, **filters: object) -> list[SessionResponse]:
-        records = _repo.list_recent(db, **filters)
+    def list_recent(
+        self,
+        db: Session,
+        *,
+        session_id: str | None = None,
+        status: str | None = None,
+        task_type: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[SessionResponse]:
+        records = _repo.list_recent(
+            db,
+            session_id=session_id,
+            status=status,
+            task_type=task_type,
+            date_from=date_from,
+            date_to=date_to,
+            limit=limit,
+            offset=offset,
+        )
         return [SessionResponse.model_validate(record) for record in records]
 
     def list_by_conversation(self, db: Session, conversation_id: str) -> list[SessionResponse]:

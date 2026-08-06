@@ -214,18 +214,27 @@ class OperationMessageRepository:
         db.commit()
         return record
 
-    def summary(self, db: Session) -> dict[str, int]:
-        rows = db.execute(select(OperationMessage.status, OperationMessage.assignee_id)).all()
+    def summary(self, db: Session, *, assignee_id: str | None = None) -> dict[str, int]:
+        rows = db.execute(select(OperationMessage.status, func.count(OperationMessage.id)).group_by(OperationMessage.status)).all()
         result = {
             OP_AWAITING_REVIEW: 0,
             OP_CLAIMED: 0,
             OP_RESOLVED: 0,
             OP_REOPENED: 0,
             OP_FAILED: 0,
+            "processing": 0,
         }
-        for status, _ in rows:
+        for status, count in rows:
             if status in result:
-                result[status] += 1
+                result[status] = count
+        result["mine"] = 0
+        if assignee_id:
+            result["mine"] = db.scalar(
+                select(func.count(OperationMessage.id)).where(
+                    OperationMessage.status == OP_CLAIMED,
+                    OperationMessage.assignee_id == assignee_id,
+                )
+            ) or 0
         return result
 
 
