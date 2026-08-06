@@ -1,6 +1,7 @@
 from datetime import datetime
 import hashlib
 import json
+import logging
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -9,6 +10,7 @@ from app.operation_agent.models.ai_usage_record_model import OperationAiUsageRec
 from app.operation_agent.models.analysis_record_model import OperationAnalysisRecord
 from app.operation_agent.repositories.ai_usage_repo import ai_usage_repo
 from app.operation_agent.repositories.analysis_record_repo import analysis_record_repo
+from app.operation_inbox.status import OP_AWAITING_REVIEW, OP_FAILED
 from app.utils.timezone import now_local
 
 
@@ -110,6 +112,20 @@ def save_analysis_result(
         total_tokens=total_tokens,
     )
     saved = analysis_record_repo.create(db, record)
+
+    try:
+        from app.operation_inbox.service import enqueue_for_review
+
+        enqueue_for_review(
+            db,
+            runtime_session_id=trace_id,
+            report_id=saved.id,
+            priority=5,
+            status=OP_FAILED if status == "failed" else OP_AWAITING_REVIEW,
+            error_message=error_message,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("运营分析消息入池失败，保留已保存的分析结果")
 
     _save_ai_usages(
         db,

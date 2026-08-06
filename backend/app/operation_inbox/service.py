@@ -97,3 +97,33 @@ class OperationMessageService:
 
 
 operation_message_service = OperationMessageService()
+
+
+def enqueue_for_review(
+    db: Session,
+    *,
+    runtime_session_id: str,
+    report_chat_message_id: str | None = None,
+    report_id: int | None = None,
+    priority: int = 0,
+    status: str = OP_AWAITING_REVIEW,
+    error_message: str | None = None,
+) -> OperationMessage:
+    """Create one review record per runtime execution.
+
+    The unique runtime-session constraint makes this safe to call from both a
+    normal completion path and any retrying caller.
+    """
+    message = operation_message_service.repository.enqueue(
+        db,
+        runtime_session_id=runtime_session_id,
+        report_chat_message_id=report_chat_message_id,
+        report_id=report_id,
+        priority=priority,
+        status=status,
+    )
+    if error_message and not message.error_message:
+        message.error_message = error_message[:65535]
+        db.commit()
+        db.refresh(message)
+    return message

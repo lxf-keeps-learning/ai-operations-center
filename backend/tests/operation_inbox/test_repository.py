@@ -95,3 +95,14 @@ def test_service_enqueue_returns_a_serialized_message(db: Session) -> None:
 
     assert message["runtime_session_id"] == "sess_service_001"
     assert message["priority"] == 4
+
+
+def test_reopen_and_retry_require_an_operator_identity(db: Session) -> None:
+    repository = OperationMessageRepository()
+    failed = repository.enqueue(db, runtime_session_id="sess_failed", status="failed")
+    resolved = repository.enqueue(db, runtime_session_id="sess_resolved", status="resolved")
+
+    assert repository.retry(db, failed.id, "") is None
+    assert repository.reopen(db, resolved.id, "") is None
+    assert db.get(OperationMessage, failed.id).status == "failed"
+    assert db.get(OperationMessage, resolved.id).status == "resolved"

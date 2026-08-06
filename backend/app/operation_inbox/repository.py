@@ -5,7 +5,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.operation_inbox.models import OperationMessage
-from app.operation_inbox.status import OP_AWAITING_REVIEW, OP_CLAIMED, OP_FAILED, OP_RESOLVED
+from app.operation_inbox.status import (
+    OP_AWAITING_REVIEW,
+    OP_CLAIMED,
+    OP_FAILED,
+    OP_REOPENED,
+    OP_RESOLVED,
+)
 from app.runtime.models.session_model import AiSession
 from app.utils.ids import new_message_id
 from app.utils.timezone import now_local
@@ -110,26 +116,51 @@ class OperationMessageRepository:
             ))
         db.commit()
 
-    def list_with_sessions(self, db: Session, *, status: str | None, assignee_id: str | None, limit: int, offset: int):
-        stmt = select(OperationMessage, AiSession).join(AiSession, AiSession.id == OperationMessage.runtime_session_id)
+    def list_with_sessions(
+        self,
+        db: Session,
+        *,
+        status: str | None,
+        assignee_id: str | None,
+        priority: int | None = None,
+        report_id: int | None = None,
+        limit: int,
+        offset: int,
+    ):
+        stmt = select(OperationMessage, AiSession).outerjoin(
+            AiSession,
+            AiSession.id == OperationMessage.runtime_session_id,
+        )
         if status == "mine":
             stmt = stmt.where(OperationMessage.assignee_id == assignee_id, OperationMessage.status == OP_CLAIMED)
         elif status == OP_CLAIMED:
             stmt = stmt.where(OperationMessage.status == OP_CLAIMED)
         elif status:
             stmt = stmt.where(OperationMessage.status == status)
+        if priority is not None:
+            stmt = stmt.where(OperationMessage.priority == priority)
+        if report_id is not None:
+            stmt = stmt.where(OperationMessage.report_id == report_id)
         stmt = stmt.order_by(OperationMessage.priority.desc(), OperationMessage.created_at.asc()).offset(offset).limit(limit)
         return list(db.execute(stmt).all())
 
     def get_with_session(self, db: Session, message_id: str):
-        stmt = select(OperationMessage, AiSession).join(AiSession, AiSession.id == OperationMessage.runtime_session_id).where(OperationMessage.id == message_id)
+        stmt = (
+            select(OperationMessage, AiSession)
+            .outerjoin(AiSession, AiSession.id == OperationMessage.runtime_session_id)
+            .where(OperationMessage.id == message_id)
+        )
         return db.execute(stmt).first()
 
     def claim(self, db: Session, message_id: str, operator_id: str, lease_minutes: int = 30) -> OperationMessage | None:
         now = now_local()
         result = db.execute(
             update(OperationMessage)
-            .where(OperationMessage.id == message_id, OperationMessage.status == OP_AWAITING_REVIEW, OperationMessage.assignee_id.is_(None))
+            .where(
+                OperationMessage.id == message_id,
+                OperationMessage.status.in_((OP_AWAITING_REVIEW, OP_REOPENED)),
+                OperationMessage.assignee_id.is_(None),
+            )
             .values(status=OP_CLAIMED, assignee_id=operator_id, claimed_at=now, lease_expires_at=now + timedelta(minutes=lease_minutes), updated_at=now)
         )
         if result.rowcount != 1:
@@ -159,17 +190,42 @@ class OperationMessageRepository:
         db.commit()
         return record
 
+    def reopen(self, db: Session, message_id: str, operator_id: str) -> OperationMessage | None:
+        record = db.get(OperationMessage, message_id)
+        if not operator_id.strip() or record is None or record.status != OP_RESOLVED:
+            return None
+        record.status = OP_REOPENED
+        record.assignee_id = None
+        record.claimed_at = None
+        record.lease_expires_at = None
+        record.resolved_at = None
+        db.commit()
+        return record
+
+    def retry(self, db: Session, message_id: str, operator_id: str) -> OperationMessage | None:
+        record = db.get(OperationMessage, message_id)
+        if not operator_id.strip() or record is None or record.status != OP_FAILED:
+            return None
+        record.status = OP_AWAITING_REVIEW
+        record.assignee_id = None
+        record.claimed_at = None
+        record.lease_expires_at = None
+        record.retry_count += 1
+        db.commit()
+        return record
+
     def summary(self, db: Session) -> dict[str, int]:
         rows = db.execute(select(OperationMessage.status, OperationMessage.assignee_id)).all()
         result = {
             OP_AWAITING_REVIEW: 0,
             OP_CLAIMED: 0,
             OP_RESOLVED: 0,
+            OP_REOPENED: 0,
             OP_FAILED: 0,
-            "processing": 0,
         }
         for status, _ in rows:
-            result[status] = result.get(status, 0) + 1
+            if status in result:
+                result[status] += 1
         return result
 
 

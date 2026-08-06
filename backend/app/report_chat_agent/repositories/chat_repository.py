@@ -1,12 +1,17 @@
+import logging
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.report_chat_agent.models import ReportChatMessage, ReportChatSession
+from app.operation_inbox.status import OP_AWAITING_REVIEW, OP_FAILED
 from app.runtime.models.conversation_model import AiConversation
 from app.runtime.models.session_model import AiSession
 from app.runtime.schemas.status import CONV_ACTIVE, SESS_FAILED, SESS_RUNNING, SESS_SUCCESS
 from app.utils.ids import new_conversation_id, new_message_id, new_session_id
 from app.utils.timezone import now_local
+
+logger = logging.getLogger(__name__)
 
 
 class ReportChatRepository:
@@ -269,6 +274,12 @@ class ReportChatRepository:
         db.add(message)
         db.commit()
         db.refresh(message)
+        self._enqueue_review_message(
+            db,
+            runtime_session_id=runtime_session_id,
+            report_chat_message_id=message.id,
+            report_id=report_id,
+        )
         return message
 
     def fail_turn(
@@ -286,6 +297,41 @@ class ReportChatRepository:
         runtime_session.error_message = error_message[:65535]
         runtime_session.finished_at = now_local()
         db.commit()
+        context = runtime_session.context if isinstance(runtime_session.context, dict) else {}
+        report_id = context.get("report_id")
+        self._enqueue_review_message(
+            db,
+            runtime_session_id=runtime_session_id,
+            report_id=int(report_id) if isinstance(report_id, int) else None,
+            status=OP_FAILED,
+            error_message=runtime_session.error_message,
+        )
+
+    @staticmethod
+    def _enqueue_review_message(
+        db: Session,
+        *,
+        runtime_session_id: str,
+        report_id: int | None,
+        report_chat_message_id: str | None = None,
+        status: str = OP_AWAITING_REVIEW,
+        error_message: str | None = None,
+    ) -> None:
+        """Best-effort review inbox write; it must not change chat outcome."""
+        try:
+            from app.operation_inbox.service import enqueue_for_review
+
+            enqueue_for_review(
+                db,
+                runtime_session_id=runtime_session_id,
+                report_chat_message_id=report_chat_message_id,
+                report_id=report_id,
+                priority=10,
+                status=status,
+                error_message=error_message,
+            )
+        except Exception:
+            logger.exception("报告问答运营消息入池失败，保留原始问答结果")
 
     def list_messages(self, db: Session, session_id: str) -> list[ReportChatMessage]:
         stmt = (

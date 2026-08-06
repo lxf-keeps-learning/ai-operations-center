@@ -1,3 +1,5 @@
+import logging
+
 from app.db.session import get_session_local
 from app.observability import build_langsmith_config
 from app.report_chat_agent.graph import report_chat_graph
@@ -6,6 +8,8 @@ from app.report_chat_agent.repositories import report_chat_repo
 from app.report_chat_agent.state import ReportChatState
 from app.security.content_moderator import ModerationAction, content_moderator
 from app.utils.ids import new_trace_id
+
+logger = logging.getLogger(__name__)
 
 
 def create_chat_session(report_id: int, user_id: str = "anonymous") -> dict:
@@ -70,6 +74,28 @@ def save_report_chat_usage(result: ReportChatState) -> None:
                 error_message=usage.get("error_message"),
             ))
         ai_usage_repo.bulk_create(db, records)
+    finally:
+        db.close()
+
+
+def _enqueue_completed_turn_for_review(result: ReportChatState, report_id: int) -> None:
+    """Best-effort producer boundary for the synchronous report-chat path."""
+    runtime_session_id = result.get("runtime_session_id")
+    if not runtime_session_id:
+        return
+    db = get_session_local()()
+    try:
+        from app.operation_inbox.service import enqueue_for_review
+
+        enqueue_for_review(
+            db,
+            runtime_session_id=runtime_session_id,
+            report_chat_message_id=result.get("message_id"),
+            report_id=report_id,
+            priority=10,
+        )
+    except Exception:
+        logger.exception("报告问答运营消息入池失败，保留原始问答结果")
     finally:
         db.close()
 
@@ -213,5 +239,6 @@ def send_chat_message(
             failed_db.close()
         raise RuntimeError("报告问答流程结束但未生成可持久化回答")
 
+    _enqueue_completed_turn_for_review(result, report_id)
     save_report_chat_usage(result)
     return result
