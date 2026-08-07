@@ -155,6 +155,8 @@ export interface RuntimeTraceListParams {
   span_type?: string
   session_id?: string
   trace_id?: string
+  date_from?: string
+  date_to?: string
   page_size?: number
 }
 

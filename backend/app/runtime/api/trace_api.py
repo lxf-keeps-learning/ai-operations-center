@@ -5,6 +5,8 @@ Trace 记录一次请求从 API → Service → Graph → Tool → LLM 的完整
 每个 Span 代表链路中的一个环节，通过 trace_id + parent_span_id 串联。
 """
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
@@ -22,6 +24,8 @@ def list_traces(
     trace_id: str | None = Query(default=None),
     graph_name: str | None = Query(default=None),
     span_type: str | None = Query(default=None),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=100, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -32,6 +36,8 @@ def list_traces(
         trace_id=trace_id,
         graph_name=graph_name,
         span_type=span_type,
+        date_from=date_from,
+        date_to=date_to,
         limit=page_size,
         offset=(page - 1) * page_size,
     )

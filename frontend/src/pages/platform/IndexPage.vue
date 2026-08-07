@@ -1,77 +1,75 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
+
+import { getPlatformOverview, type PlatformOverview, type PlatformOverviewSession } from '@/api/platform'
+
+import {
+  buildOverviewMetricLinks,
+  formatOverviewDate,
+  formatOverviewMetric,
+  formatOverviewTokens,
+  formatOverviewUpdatedAt,
+  getOverviewSessionStatus,
+} from './indexPageModel'
 
 type SessionStatus = 'running' | 'success' | 'failed'
 
-interface PlatformSession {
-  id: string
-  title: string
-  agent: string
-  channel: string
-  status: SessionStatus
-  runs: number
-  tokens: string
-  updatedAt: string
-}
-
 const activeTab = ref<'overview' | 'usage'>('overview')
 const selectedFilter = ref<'all' | SessionStatus>('all')
+const overview = ref<PlatformOverview | null>(null)
+const loading = ref(false)
+const error = ref('')
+const metricLinks = buildOverviewMetricLinks()
+const todayLabel = formatOverviewDate(new Date())
 
-const sessions: PlatformSession[] = [
-  {
-    id: 'sess_20260806_8c1a',
-    title: '本质安全报告追问',
-    agent: 'operation-supervisor',
-    channel: 'Web Console',
-    status: 'running',
-    runs: 4,
-    tokens: '12.4k',
-    updatedAt: '刚刚',
-  },
-  {
-    id: 'sess_20260806_41fd',
-    title: '设备维护异常分析',
-    agent: 'maintenance-agent',
-    channel: 'Runtime API',
-    status: 'success',
-    runs: 7,
-    tokens: '28.6k',
-    updatedAt: '8 分钟前',
-  },
-  {
-    id: 'sess_20260806_0b72',
-    title: '生产运营日报汇总',
-    agent: 'operation-supervisor',
-    channel: 'Cron',
-    status: 'success',
-    runs: 1,
-    tokens: '8.1k',
-    updatedAt: '26 分钟前',
-  },
-  {
-    id: 'sess_20260805_f320',
-    title: '安全风险建议生成',
-    agent: 'safety-agent',
-    channel: 'Web Console',
-    status: 'failed',
-    runs: 3,
-    tokens: '4.8k',
-    updatedAt: '昨天 18:42',
-  },
-]
+const metrics = computed(() => overview.value?.metrics)
+const sessions = computed(() => overview.value?.recent_sessions || [])
 
 const filteredSessions = computed(() => {
-  if (selectedFilter.value === 'all') return sessions
-  return sessions.filter((session) => session.status === selectedFilter.value)
+  if (selectedFilter.value === 'all') return sessions.value
+  return sessions.value.filter((session) => getOverviewSessionStatus(session.status) === selectedFilter.value)
 })
 
-function statusLabel(status: SessionStatus) {
-  return { running: '运行中', success: '已完成', failed: '失败' }[status]
+const metricCards = computed(() => [
+  { key: 'todayRequests', label: '今日请求数', value: metrics.value ? formatOverviewMetric(metrics.value.today_requests) : '—', detail: '按本地日统计', icon: '⌁', tone: 'blue', link: metricLinks.todayRequests },
+  { key: 'runningTasks', label: '运行中任务', value: metrics.value ? formatOverviewMetric(metrics.value.running_tasks) : '—', detail: 'queued + running', icon: '◷', tone: 'orange', link: metricLinks.runningTasks },
+  { key: 'pendingMessages', label: '待处理消息', value: metrics.value ? formatOverviewMetric(metrics.value.pending_messages) : '—', detail: '待复核与重新打开', icon: '▱', tone: 'cyan', link: metricLinks.pendingMessages },
+  { key: 'failedTasks', label: '失败任务', value: metrics.value ? formatOverviewMetric(metrics.value.failed_tasks) : '—', detail: '今日失败 Session', icon: '!', tone: 'red', link: metricLinks.failedTasks },
+  { key: 'tokenUsage', label: 'Token 用量', value: metrics.value ? formatOverviewTokens(metrics.value.total_tokens) : '—', detail: '今日 LLM Token', icon: '#', tone: 'purple', link: metricLinks.tokenUsage },
+  { key: 'agentSuccessRate', label: 'Agent 成功率', value: metrics.value ? formatOverviewMetric(metrics.value.agent_success_rate, 'percent') : '—', detail: '已结束 Session', icon: '♙', tone: 'green', link: metricLinks.agentSuccessRate },
+  { key: 'averageResponse', label: '平均响应时长', value: metrics.value ? formatOverviewMetric(metrics.value.average_response_ms, 'duration') : '—', detail: '已完成 Session', icon: '◌', tone: 'blue', link: metricLinks.averageResponse },
+])
+
+function statusLabel(status: string) {
+  const normalized = getOverviewSessionStatus(status)
+  if (normalized === 'running') return '运行中'
+  if (normalized === 'success') return '已完成'
+  if (normalized === 'cancelled') return '已取消'
+  return '失败'
 }
 
-function statusClass(status: SessionStatus) {
-  return `session-status--${status}`
+function statusClass(status: string) {
+  return `session-status--${getOverviewSessionStatus(status)}`
 }
+
+function sessionTitle(session: PlatformOverviewSession) {
+  return session.title || session.id
+}
+
+async function loadOverview() {
+  loading.value = true
+  error.value = ''
+  try {
+    overview.value = await getPlatformOverview()
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : '概览数据加载失败'
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(() => void loadOverview())
 </script>
 
 <template>
@@ -84,7 +82,7 @@ function statusClass(status: SessionStatus) {
       </div>
       <div class="dashboard-heading__meta">
         <span class="live-pill"><span class="status-dot" /> 实时数据</span>
-        <span class="muted-label">2026 年 8 月 6 日</span>
+        <span class="muted-label">{{ todayLabel }}</span>
       </div>
     </section>
 
@@ -99,52 +97,33 @@ function statusClass(status: SessionStatus) {
 
     <template v-if="activeTab === 'overview'">
       <section class="metric-grid">
-        <article class="metric-card">
-          <div class="metric-card__top"><span class="metric-icon metric-icon--blue">⌁</span><span class="metric-change metric-change--down">↘ -12.8%</span></div>
-          <span class="metric-label">今日请求</span>
-          <strong>128</strong>
-          <div class="sparkline sparkline--blue"><i /><i /><i /><i /><i /><i /><i /></div>
-        </article>
-        <article class="metric-card">
-          <div class="metric-card__top"><span class="metric-icon metric-icon--purple">#</span><span class="metric-change metric-change--up">↗ +8.4%</span></div>
-          <span class="metric-label">今日 Token</span>
-          <strong>184.6k</strong>
-          <small>输入 / 输出</small>
-          <div class="sparkline sparkline--purple"><i /><i /><i /><i /><i /><i /><i /></div>
-        </article>
-        <article class="metric-card">
-          <div class="metric-card__top"><span class="metric-icon metric-icon--green">$</span><span class="metric-change">本月</span></div>
-          <span class="metric-label">今日费用</span>
-          <strong class="metric-card__pending">待计算</strong>
-          <small>已记录 Token，待接入模型价格表</small>
-          <div class="sparkline sparkline--green"><i /><i /><i /><i /><i /><i /><i /></div>
-        </article>
-        <article class="metric-card">
-          <div class="metric-card__top"><span class="metric-icon metric-icon--orange">♙</span><span class="metric-change">18 个 Agent</span></div>
-          <span class="metric-label">运行中 Agent</span>
-          <strong>3 <em>/ 18</em></strong>
-          <div class="metric-progress"><span style="width: 17%" /></div>
-        </article>
-        <article class="metric-card">
-          <div class="metric-card__top"><span class="metric-icon metric-icon--cyan">◉</span><span class="metric-change">4 个渠道</span></div>
-          <span class="metric-label">在线 Channel</span>
-          <strong>4 <em>/ 4</em></strong>
-          <div class="metric-progress metric-progress--cyan"><span style="width: 100%" /></div>
-        </article>
+        <RouterLink v-for="metric in metricCards" :key="metric.key" class="metric-card" :class="`metric-card--${metric.tone}`" :to="metric.link" :aria-label="`${metric.label}，点击查看明细`">
+          <div class="metric-card__top"><span class="metric-icon">{{ metric.icon }}</span><span class="metric-change">查看明细 →</span></div>
+          <span class="metric-label">{{ metric.label }}</span>
+          <strong>{{ metric.value }}</strong>
+          <small>{{ metric.detail }}</small>
+          <div class="sparkline"><i /><i /><i /><i /><i /><i /><i /></div>
+        </RouterLink>
       </section>
+
+      <div v-if="loading" class="overview-notice overview-notice--loading" role="status">正在加载概览数据...</div>
+      <div v-if="error" class="overview-notice overview-notice--error" role="alert">
+        <span>{{ error }}</span>
+        <button type="button" @click="loadOverview">重试</button>
+      </div>
 
       <section class="health-panel panel">
         <div class="panel-heading">
-          <div><span class="section-icon">▣</span><h2>系统健康</h2></div>
-          <span class="health-summary"><span class="status-dot" /> 所有核心服务正常</span>
+          <div><span class="section-icon">▣</span><h2>运行摘要</h2></div>
+          <span class="health-summary"><span class="status-dot" :class="{ 'status-dot--error': error }" /> {{ error ? '概览接口异常' : loading ? '正在同步' : '数据已同步' }}</span>
         </div>
         <div class="health-grid">
-          <div class="health-card"><span class="health-card__icon">◷</span><div><span>运行时间</span><strong>1d 18h 21m</strong></div></div>
-          <div class="health-card"><span class="health-card__icon">▤</span><div><span>数据库</span><strong class="health-ok">已连接</strong></div></div>
-          <div class="health-card"><span class="health-card__icon">⌁</span><div><span>Provider</span><strong class="health-ok">活跃</strong></div></div>
-          <div class="health-card"><span class="health-card__icon">⚒</span><div><span>工具</span><strong>43</strong></div></div>
-          <div class="health-card"><span class="health-card__icon">▣</span><div><span>Session</span><strong>4,994</strong></div></div>
-          <div class="health-card"><span class="health-card__icon">♧</span><div><span>客户端</span><strong>4</strong></div></div>
+          <div class="health-card"><span class="health-card__icon">◷</span><div><span>最近 Session</span><strong>{{ sessions.length }} 条</strong></div></div>
+          <div class="health-card"><span class="health-card__icon">⌁</span><div><span>今日请求</span><strong>{{ metrics ? formatOverviewMetric(metrics.today_requests) : '—' }}</strong></div></div>
+          <div class="health-card"><span class="health-card__icon">♙</span><div><span>运行中任务</span><strong>{{ metrics ? formatOverviewMetric(metrics.running_tasks) : '—' }}</strong></div></div>
+          <div class="health-card"><span class="health-card__icon">#</span><div><span>LLM Token</span><strong>{{ metrics ? formatOverviewTokens(metrics.total_tokens) : '—' }}</strong></div></div>
+          <div class="health-card"><span class="health-card__icon">◌</span><div><span>平均响应</span><strong>{{ metrics ? formatOverviewMetric(metrics.average_response_ms, 'duration') : '—' }}</strong></div></div>
+          <div class="health-card"><span class="health-card__icon">✓</span><div><span>成功率</span><strong>{{ metrics ? formatOverviewMetric(metrics.agent_success_rate, 'percent') : '—' }}</strong></div></div>
         </div>
         <div class="runtime-strip">
           <span class="runtime-strip__label">运行时</span>
@@ -166,14 +145,16 @@ function statusClass(status: SessionStatus) {
         </div>
         <div class="session-table">
           <div class="session-table__row session-table__row--head"><span>SESSION</span><span>AGENT</span><span>CHANNEL</span><span>RUNS</span><span>TOKENS</span><span>状态</span><span>更新时间</span></div>
+          <div v-if="loading && !overview" class="session-empty">正在加载 Session...</div>
+          <div v-else-if="!filteredSessions.length" class="session-empty">暂无符合条件的 Session</div>
           <div v-for="session in filteredSessions" :key="session.id" class="session-table__row">
-            <div class="session-name"><strong>{{ session.title }}</strong><small>{{ session.id }}</small></div>
-            <span class="session-agent">{{ session.agent }}</span>
-            <span class="session-channel">{{ session.channel }}</span>
+            <RouterLink class="session-name" :to="{ path: '/platform/sessions', query: { session_id: session.id } }"><strong>{{ sessionTitle(session) }}</strong><small>{{ session.id }}</small></RouterLink>
+            <span class="session-agent">{{ session.agent || '-' }}</span>
+            <span class="session-channel">{{ session.channel || '-' }}</span>
             <span>{{ session.runs }}</span>
-            <span>{{ session.tokens }}</span>
+            <span>{{ formatOverviewTokens(session.total_tokens) }}</span>
             <span class="session-status" :class="statusClass(session.status)"><span class="status-dot" />{{ statusLabel(session.status) }}</span>
-            <span class="session-time">{{ session.updatedAt }}</span>
+            <span class="session-time">{{ formatOverviewUpdatedAt(session.updated_at) }}</span>
           </div>
         </div>
       </section>
@@ -280,7 +261,7 @@ h1 {
 .metric-grid {
   display: grid;
   gap: 16px;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-bottom: 28px;
 }
 
@@ -292,10 +273,21 @@ h1 {
 }
 
 .metric-card {
+  color: inherit;
   min-height: 166px;
   overflow: hidden;
   padding: 17px 18px 0;
   position: relative;
+  text-decoration: none;
+  transition: border-color 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.metric-card:hover,
+.metric-card:focus-visible {
+  border-color: rgba(124, 141, 255, 0.7);
+  box-shadow: 0 10px 24px rgba(1, 8, 26, 0.24);
+  outline: none;
+  transform: translateY(-2px);
 }
 
 .metric-card__top {
@@ -322,6 +314,11 @@ h1 {
   width: 38px;
 }
 
+.metric-card--green .metric-icon { color: #5ed7aa; }
+.metric-card--orange .metric-icon { color: #ffbe76; }
+.metric-card--cyan .metric-icon { color: #72d9e3; }
+.metric-card--red .metric-icon { color: #f27b89; }
+.metric-card--purple .metric-icon { color: #b28cff; }
 .metric-icon--green { color: #5ed7aa; }
 .metric-icon--orange { color: #ffbe76; }
 .metric-icon--cyan { color: #72d9e3; }
@@ -453,6 +450,23 @@ h2 {
   gap: 8px;
 }
 
+.status-dot--error { background: #ef6478; }
+
+.overview-notice {
+  align-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 8px;
+  display: flex;
+  font-size: 12px;
+  justify-content: space-between;
+  margin: -10px 0 22px;
+  padding: 10px 13px;
+}
+
+.overview-notice--loading { background: rgba(85, 104, 194, 0.12); color: #aab8e4; }
+.overview-notice--error { background: rgba(239, 100, 120, 0.1); border-color: rgba(239, 100, 120, 0.3); color: #f59aaa; }
+.overview-notice button { background: transparent; border: 0; color: inherit; cursor: pointer; font-weight: 700; }
+
 .health-grid {
   display: grid;
   gap: 12px;
@@ -579,6 +593,8 @@ h2 {
   display: block;
 }
 
+.session-name { text-decoration: none; }
+
 .session-name strong {
   color: #e6ecfd;
   font-size: 12px;
@@ -615,6 +631,14 @@ h2 {
 .session-status--failed { color: #f27b89; }
 .session-status--failed .status-dot { background: #ef6478; }
 .session-status--success .status-dot { background: #6f809e; }
+.session-status--cancelled { color: #d69b68; }
+.session-status--cancelled .status-dot { background: #d69b68; }
+
+.session-empty {
+  color: #71809b;
+  padding: 44px 12px;
+  text-align: center;
+}
 
 .usage-placeholder {
   align-items: center;

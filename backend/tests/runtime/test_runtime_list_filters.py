@@ -39,26 +39,33 @@ def client_and_session_factory() -> Iterator[tuple[TestClient, sessionmaker[Sess
     Base.metadata.drop_all(engine)
 
 
-def _add_session(db: Session, session_id: str, created_at: datetime) -> None:
+def _add_session(db: Session, session_id: str, created_at: datetime, status: str = "success") -> None:
     db.add(AiSession(
         id=session_id,
         conversation_id=f"conversation-{session_id}",
         user_id="operator",
         input_text="Review the operation result",
-        status="success",
+        status=status,
         created_at=created_at,
         updated_at=created_at,
     ))
 
 
-def _add_trace(db: Session, trace_id: str, session_id: str) -> None:
+def _add_trace(
+    db: Session,
+    trace_id: str,
+    session_id: str,
+    *,
+    created_at: datetime = datetime(2026, 8, 6, 12, 0, 0),
+    span_type: str = "llm",
+) -> None:
     db.add(AiTrace(
         id=trace_id,
         trace_id=trace_id,
         session_id=session_id,
-        span_type="llm",
+        span_type=span_type,
         status="success",
-        created_at=datetime(2026, 8, 6, 12, 0, 0),
+        created_at=created_at,
     ))
 
 
@@ -112,3 +119,38 @@ def test_trace_list_applies_trace_id_filter(
 
     assert response.status_code == 200
     assert [item["id"] for item in response.json()["data"]] == ["trace-match"]
+
+
+def test_session_list_accepts_multiple_status_values(
+    client_and_session_factory: tuple[TestClient, sessionmaker[Session]],
+) -> None:
+    client, session_factory = client_and_session_factory
+    with session_factory() as db:
+        _add_session(db, "session-queued", datetime(2026, 8, 6, 9, 0, 0), status="queued")
+        _add_session(db, "session-running", datetime(2026, 8, 6, 10, 0, 0), status="running")
+        _add_session(db, "session-success", datetime(2026, 8, 6, 11, 0, 0), status="success")
+        db.commit()
+
+    response = client.get("/api/v1/runtime/sessions", params={"status": "queued,running"})
+
+    assert response.status_code == 200
+    assert {item["id"] for item in response.json()["data"]} == {"session-queued", "session-running"}
+
+
+def test_trace_list_applies_span_type_and_local_date_filters(
+    client_and_session_factory: tuple[TestClient, sessionmaker[Session]],
+) -> None:
+    client, session_factory = client_and_session_factory
+    with session_factory() as db:
+        _add_trace(db, "trace-in-range", "session-match", created_at=datetime(2026, 8, 7, 9, 0, 0))
+        _add_trace(db, "trace-before-range", "session-match", created_at=datetime(2026, 8, 6, 23, 59, 59))
+        _add_trace(db, "trace-non-llm", "session-match", created_at=datetime(2026, 8, 7, 10, 0, 0), span_type="tool")
+        db.commit()
+
+    response = client.get(
+        "/api/v1/runtime/traces",
+        params={"span_type": "llm", "date_from": "2026-08-07", "date_to": "2026-08-07"},
+    )
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["data"]] == ["trace-in-range"]

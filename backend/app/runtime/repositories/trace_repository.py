@@ -1,5 +1,7 @@
 """TraceRepository — 全链路追踪数据访问层"""
 
+from datetime import date, datetime, time, timedelta
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -89,6 +91,8 @@ class TraceRepository:
         trace_id: str | None = None,
         graph_name: str | None = None,
         span_type: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[AiTrace]:
@@ -101,5 +105,9 @@ class TraceRepository:
             stmt = stmt.where(AiTrace.graph_name == graph_name)
         if span_type:
             stmt = stmt.where(AiTrace.span_type == span_type)
+        if date_from:
+            stmt = stmt.where(AiTrace.created_at >= datetime.combine(date_from, time.min))
+        if date_to:
+            stmt = stmt.where(AiTrace.created_at < datetime.combine(date_to + timedelta(days=1), time.min))
         stmt = stmt.order_by(AiTrace.created_at.desc()).offset(offset).limit(limit)
         return list(db.scalars(stmt).all())
