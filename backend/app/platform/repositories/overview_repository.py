@@ -99,7 +99,7 @@ class OverviewRepository:
             .outerjoin(AiConversation, AiConversation.id == AiSession.conversation_id)
             .outerjoin(run_counts, run_counts.c.conversation_id == AiSession.conversation_id)
             .outerjoin(llm_tokens, llm_tokens.c.session_id == AiSession.id)
-            .order_by(AiSession.updated_at.desc(), AiSession.id.desc())
+            .order_by(AiSession.created_at.desc(), AiSession.id.desc())
             .limit(limit)
         ).all()
         return [

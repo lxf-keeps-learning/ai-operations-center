@@ -67,6 +67,7 @@ class OperationMessageRepository:
         offset: int = 0,
         limit: int = 50,
     ) -> list[OperationMessage]:
+        self.reclaim_expired(db)
         stmt = select(OperationMessage)
         if status is not None:
             stmt = stmt.where(OperationMessage.status == status)
@@ -80,13 +81,41 @@ class OperationMessageRepository:
         return list(db.scalars(stmt.offset(offset).limit(limit)))
 
     def count_by_status(self, db: Session) -> dict[str, int]:
+        self.reclaim_expired(db)
         rows = db.execute(
             select(OperationMessage.status, func.count(OperationMessage.id)).group_by(OperationMessage.status)
         ).all()
         return {status: count for status, count in rows}
 
     def get_by_id(self, db: Session, message_id: str) -> OperationMessage | None:
+        self.reclaim_expired(db)
         return db.get(OperationMessage, message_id)
+
+    def reclaim_expired(self, db: Session) -> int:
+        """Release claimed messages whose lease has elapsed.
+
+        The conditional update is atomic, so concurrent list/claim requests
+        cannot reassign the same live lease. Expired work is reopened rather
+        than treated as a fresh queue item, preserving the lifecycle history.
+        """
+        now = now_local()
+        result = db.execute(
+            update(OperationMessage)
+            .where(
+                OperationMessage.status == OP_CLAIMED,
+                OperationMessage.lease_expires_at.is_not(None),
+                OperationMessage.lease_expires_at <= now,
+            )
+            .values(
+                status=OP_REOPENED,
+                assignee_id=None,
+                claimed_at=None,
+                lease_expires_at=None,
+                updated_at=now,
+            )
+        )
+        db.commit()
+        return int(result.rowcount or 0)
 
     def sync_sessions(self, db: Session) -> None:
         """将已有运行记录纳入运营池，兼容队列 Worker 接入前的存量任务。"""
@@ -127,6 +156,7 @@ class OperationMessageRepository:
         limit: int,
         offset: int,
     ):
+        self.reclaim_expired(db)
         stmt = select(OperationMessage, AiSession).outerjoin(
             AiSession,
             AiSession.id == OperationMessage.runtime_session_id,
@@ -145,6 +175,7 @@ class OperationMessageRepository:
         return list(db.execute(stmt).all())
 
     def get_with_session(self, db: Session, message_id: str):
+        self.reclaim_expired(db)
         stmt = (
             select(OperationMessage, AiSession)
             .outerjoin(AiSession, AiSession.id == OperationMessage.runtime_session_id)
@@ -153,6 +184,7 @@ class OperationMessageRepository:
         return db.execute(stmt).first()
 
     def claim(self, db: Session, message_id: str, operator_id: str, lease_minutes: int = 30) -> OperationMessage | None:
+        self.reclaim_expired(db)
         now = now_local()
         result = db.execute(
             update(OperationMessage)
@@ -170,6 +202,7 @@ class OperationMessageRepository:
         return db.get(OperationMessage, message_id)
 
     def release(self, db: Session, message_id: str, operator_id: str) -> OperationMessage | None:
+        self.reclaim_expired(db)
         record = db.get(OperationMessage, message_id)
         if record is None or record.status != OP_CLAIMED or record.assignee_id != operator_id:
             return None
@@ -181,6 +214,7 @@ class OperationMessageRepository:
         return record
 
     def resolve(self, db: Session, message_id: str, operator_id: str, note: str) -> OperationMessage | None:
+        self.reclaim_expired(db)
         record = db.get(OperationMessage, message_id)
         if record is None or record.status != OP_CLAIMED or record.assignee_id != operator_id:
             return None

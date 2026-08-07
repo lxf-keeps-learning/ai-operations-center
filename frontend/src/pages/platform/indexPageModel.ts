@@ -13,7 +13,7 @@ export interface OverviewMetricLinks {
   averageResponse: OverviewMetricLink
 }
 
-export type OverviewSessionStatus = 'running' | 'success' | 'failed' | 'cancelled'
+export type OverviewSessionStatus = 'running' | 'success' | 'failed' | 'cancelled' | 'other'
 
 function pad(value: number) {
   return String(value).padStart(2, '0')
@@ -62,8 +62,9 @@ export function formatOverviewUpdatedAt(value: string | null | undefined) {
 }
 
 export function getOverviewSessionStatus(status: string): OverviewSessionStatus {
-  if (status === 'queued' || status === 'running' || status === 'cancel_requested') return 'running'
+  if (status === 'created' || status === 'queued' || status === 'running' || status === 'cancel_requested') return 'running'
   if (status === 'success') return 'success'
+  if (status === 'failed') return 'failed'
   if (status === 'cancelled') return 'cancelled'
-  return 'failed'
+  return 'other'
 }

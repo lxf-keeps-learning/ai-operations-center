@@ -106,7 +106,7 @@ async def test_model_config_does_not_expose_api_keys() -> None:
         payload = response.json()
         providers = {item["provider"] for item in payload["data"]}
         assert response.status_code == 200
-        assert providers == {"qwen", "deepseek", "doubao"}
+        assert providers == {"qwen", "deepseek", "doubao", "zhipu"}
         assert all("apiKey" not in item and "api_key" not in item for item in payload["data"])
 
 

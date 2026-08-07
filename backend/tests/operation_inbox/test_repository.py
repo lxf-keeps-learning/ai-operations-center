@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from datetime import timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -10,6 +11,8 @@ from app.db.base import Base
 from app.operation_inbox.models import OperationMessage
 from app.operation_inbox.repository import OperationMessageRepository
 from app.operation_inbox.service import OperationMessageService
+from app.operation_inbox.status import OP_CLAIMED, OP_REOPENED
+from app.utils.timezone import now_local
 
 
 @pytest.fixture
@@ -106,3 +109,26 @@ def test_reopen_and_retry_require_an_operator_identity(db: Session) -> None:
     assert repository.reopen(db, resolved.id, "") is None
     assert db.get(OperationMessage, failed.id).status == "failed"
     assert db.get(OperationMessage, resolved.id).status == "resolved"
+
+
+def test_expired_claim_is_reopened_and_can_be_claimed_by_another_operator(db: Session) -> None:
+    repository = OperationMessageRepository()
+    message = repository.enqueue(db, runtime_session_id="sess_expired_claim")
+    message.status = OP_CLAIMED
+    message.assignee_id = "operator_a"
+    message.claimed_at = now_local() - timedelta(minutes=31)
+    message.lease_expires_at = now_local() - timedelta(minutes=1)
+    db.commit()
+
+    assert repository.reclaim_expired(db) == 1
+    reclaimed = db.get(OperationMessage, message.id)
+    assert reclaimed is not None
+    assert reclaimed.status == OP_REOPENED
+    assert reclaimed.assignee_id is None
+    assert reclaimed.claimed_at is None
+    assert reclaimed.lease_expires_at is None
+
+    claimed = repository.claim(db, message.id, "operator_b")
+    assert claimed is not None
+    assert claimed.status == OP_CLAIMED
+    assert claimed.assignee_id == "operator_b"

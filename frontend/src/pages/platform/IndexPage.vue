@@ -13,7 +13,7 @@ import {
   getOverviewSessionStatus,
 } from './indexPageModel'
 
-type SessionStatus = 'running' | 'success' | 'failed'
+type SessionStatus = 'running' | 'success' | 'failed' | 'other'
 
 const activeTab = ref<'overview' | 'usage'>('overview')
 const selectedFilter = ref<'all' | SessionStatus>('all')
@@ -46,7 +46,8 @@ function statusLabel(status: string) {
   if (normalized === 'running') return '运行中'
   if (normalized === 'success') return '已完成'
   if (normalized === 'cancelled') return '已取消'
-  return '失败'
+  if (normalized === 'failed') return '失败'
+  return '其他'
 }
 
 function statusClass(status: string) {
@@ -141,6 +142,7 @@ onMounted(() => void loadOverview())
             <button :class="{ 'is-active': selectedFilter === 'all' }" @click="selectedFilter = 'all'">全部</button>
             <button :class="{ 'is-active': selectedFilter === 'running' }" @click="selectedFilter = 'running'">运行中</button>
             <button :class="{ 'is-active': selectedFilter === 'failed' }" @click="selectedFilter = 'failed'">失败</button>
+            <button :class="{ 'is-active': selectedFilter === 'other' }" @click="selectedFilter = 'other'">其他</button>
           </div>
         </div>
         <div class="session-table">
@@ -633,6 +635,8 @@ h2 {
 .session-status--success .status-dot { background: #6f809e; }
 .session-status--cancelled { color: #d69b68; }
 .session-status--cancelled .status-dot { background: #d69b68; }
+.session-status--other { color: #9aa7c2; }
+.session-status--other .status-dot { background: #9aa7c2; }
 
 .session-empty {
   color: #71809b;
