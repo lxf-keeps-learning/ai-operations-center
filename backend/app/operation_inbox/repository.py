@@ -249,6 +249,7 @@ class OperationMessageRepository:
         return record
 
     def summary(self, db: Session, *, assignee_id: str | None = None) -> dict[str, int]:
+        self.reclaim_expired(db)
         rows = db.execute(select(OperationMessage.status, func.count(OperationMessage.id)).group_by(OperationMessage.status)).all()
         result = {
             OP_AWAITING_REVIEW: 0,
