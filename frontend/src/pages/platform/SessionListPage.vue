@@ -118,7 +118,7 @@ function retrySession(session: RuntimeSession) {
 
     <form class="runtime-filters" @submit.prevent="loadSessions">
       <label>Session<input v-model="sessionFilter" placeholder="Session ID" /></label>
-      <label>状态<select v-model="statusFilter"><option value="">全部</option><option value="running">运行中</option><option value="success">已完成</option><option value="failed">失败</option><option value="cancelled">已取消</option></select></label>
+      <label>状态<select v-model="statusFilter"><option value="">全部</option><option value="running">运行中</option><option value="queued,running">运行中任务（含 queued）</option><option value="success">已完成</option><option value="failed">失败</option><option value="success,failed">已结束任务</option><option value="cancelled">已取消</option></select></label>
       <label>开始日期<input v-model="dateFrom" type="date" /></label>
       <label>结束日期<input v-model="dateTo" type="date" /></label>
       <label>每页<select v-model.number="pageSize"><option :value="20">20</option><option :value="50">50</option><option :value="100">100</option></select></label>

@@ -47,7 +47,11 @@ class SessionRepository:
         if session_id:
             stmt = stmt.where(AiSession.id == session_id)
         if status:
-            stmt = stmt.where(AiSession.status == status)
+            statuses = tuple(value.strip() for value in status.split(",") if value.strip())
+            if len(statuses) == 1:
+                stmt = stmt.where(AiSession.status == statuses[0])
+            elif statuses:
+                stmt = stmt.where(AiSession.status.in_(statuses))
         if task_type:
             stmt = stmt.where(AiSession.task_type == task_type)
         if date_from:

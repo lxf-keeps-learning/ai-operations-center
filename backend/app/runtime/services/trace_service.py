@@ -11,6 +11,8 @@ Trace span 层级结构：
   └── graph    span (LangGraph 整体耗时)
 """
 
+from datetime import date
+
 from sqlalchemy.orm import Session
 
 from app.runtime.repositories.trace_repository import TraceRepository
@@ -43,6 +45,8 @@ class TraceService:
         trace_id: str | None = None,
         graph_name: str | None = None,
         span_type: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[TraceResponse]:
@@ -52,6 +56,8 @@ class TraceService:
             trace_id=trace_id,
             graph_name=graph_name,
             span_type=span_type,
+            date_from=date_from,
+            date_to=date_to,
             limit=limit,
             offset=offset,
         )

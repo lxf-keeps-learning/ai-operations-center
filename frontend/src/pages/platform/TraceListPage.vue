@@ -18,6 +18,8 @@ const traceFilter = ref(queryValue('trace_id'))
 const sessionFilter = ref(queryValue('session_id'))
 const graphFilter = ref(queryValue('graph_name'))
 const spanTypeFilter = ref(queryValue('span_type'))
+const dateFrom = ref(queryValue('date_from'))
+const dateTo = ref(queryValue('date_to'))
 const pageSize = ref(Number(queryValue('page_size')) || 100)
 
 const traceRows = computed(() => {
@@ -37,6 +39,8 @@ async function loadTraces() {
       trace_id: traceFilter.value || undefined,
       graph_name: graphFilter.value || undefined,
       span_type: spanTypeFilter.value || undefined,
+      date_from: dateFrom.value || undefined,
+      date_to: dateTo.value || undefined,
       page_size: pageSize.value,
     })
   }
@@ -56,6 +60,8 @@ function resetFilters() {
   sessionFilter.value = ''
   graphFilter.value = ''
   spanTypeFilter.value = ''
+  dateFrom.value = ''
+  dateTo.value = ''
   pageSize.value = 100
   void loadTraces()
 }
@@ -64,7 +70,7 @@ function resetFilters() {
 <template>
   <div class="trace-page">
     <div class="trace-page__header"><div><h1>Trace 链路记录</h1><p>按一次请求聚合完整 Span，查看 Graph、节点、Prompt、模型和工具调用。</p></div><button class="refresh-btn" type="button" @click="loadTraces">刷新</button></div>
-    <form class="trace-toolbar" @submit.prevent="loadTraces"><input v-model="traceFilter" placeholder="按 Trace ID 筛选" /><input v-model="sessionFilter" placeholder="Session ID" /><input v-model="graphFilter" placeholder="Graph 名称" /><input v-model="spanTypeFilter" placeholder="Span 类型" /><select v-model.number="pageSize" aria-label="每页数量"><option :value="50">50 条</option><option :value="100">100 条</option><option :value="200">200 条</option></select><button class="filter-btn" type="submit">筛选</button><button class="filter-btn" type="button" @click="resetFilters">重置</button><span>{{ traceRows.length }} 条链路</span></form>
+    <form class="trace-toolbar" @submit.prevent="loadTraces"><input v-model="traceFilter" placeholder="按 Trace ID 筛选" /><input v-model="sessionFilter" placeholder="Session ID" /><input v-model="graphFilter" placeholder="Graph 名称" /><input v-model="spanTypeFilter" placeholder="Span 类型" /><input v-model="dateFrom" type="date" aria-label="开始日期" /><input v-model="dateTo" type="date" aria-label="结束日期" /><select v-model.number="pageSize" aria-label="每页数量"><option :value="50">50 条</option><option :value="100">100 条</option><option :value="200">200 条</option></select><button class="filter-btn" type="submit">筛选</button><button class="filter-btn" type="button" @click="resetFilters">重置</button><span>{{ traceRows.length }} 条链路</span></form>
     <div v-if="error" class="runtime-error">{{ error }}</div>
     <div v-if="loading" class="runtime-empty">加载中...</div>
     <div v-else-if="!traceRows.length" class="runtime-empty">暂无 Trace 链路记录</div>
