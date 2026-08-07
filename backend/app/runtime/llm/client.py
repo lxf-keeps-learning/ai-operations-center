@@ -111,12 +111,15 @@ class LlmClient:
                 self._models[provider.provider] = self._build_model(provider)
 
     def _get_model(self, provider: LLMProviderConfig) -> ChatOpenAI | None:
+        model = self._models.get(provider.provider)
+        if model is not None:
+            configured_model = getattr(model, "model_name", None)
+            if configured_model is None or configured_model == provider.model:
+                return model
         if not provider.api_key:
             return None
-        model = self._models.get(provider.provider)
-        if model is None or getattr(model, "model_name", None) != provider.model:
-            model = self._build_model(provider)
-            self._models[provider.provider] = model
+        model = self._build_model(provider)
+        self._models[provider.provider] = model
         return model
 
     def chat(

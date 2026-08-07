@@ -195,7 +195,7 @@ def test_overview_aggregates_local_day_metrics_and_terminal_samples(db_session: 
 
 
 def test_overview_returns_newest_ten_sessions_with_joined_summary_fields(db_session: Session) -> None:
-    """Removing sort, joins, per-conversation runs, or LLM token sums must fail this test."""
+    """Removing created-at sort, joins, per-conversation runs, or LLM token sums must fail this test."""
     db_session.add(AiConversation(
         id="conv_named",
         user_id="operator",
@@ -218,8 +218,8 @@ def test_overview_returns_newest_ten_sessions_with_joined_summary_fields(db_sess
             db_session,
             session_id=session_id,
             conversation_id=conversation_id,
-            created_at=FIXED_LOCAL_NOW,
-            updated_at=FIXED_LOCAL_NOW + timedelta(minutes=index),
+            created_at=FIXED_LOCAL_NOW + timedelta(minutes=index),
+            updated_at=FIXED_LOCAL_NOW + timedelta(minutes=99 if index == 0 else index),
             status="success",
             task_type="report_chat" if index == 11 else None,
             context={"channel": "console"} if index == 11 else None,

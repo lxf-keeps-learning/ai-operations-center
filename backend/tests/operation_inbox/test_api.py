@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from datetime import timedelta
 import os
 
 import pytest
@@ -211,6 +212,33 @@ def test_message_actions_reject_conflicts_and_allow_valid_lifecycle(
     assert reopened["data"]["status"] == OP_REOPENED
     assert retried["data"]["status"] == OP_AWAITING_REVIEW
     assert retried["data"]["retry_count"] == 1
+
+
+def test_expired_claim_can_be_reclaimed_by_another_operator_through_api(
+    api_db: tuple[TestClient, sessionmaker[Session]],
+) -> None:
+    client, session_local = api_db
+    with session_local() as db:
+        message = _create_message(
+            db,
+            message_id="msg_expired_api",
+            runtime_session_id="runtime_expired_api",
+            status=OP_CLAIMED,
+            assignee_id="operator_a",
+        )
+        message.claimed_at = now_local() - timedelta(minutes=31)
+        message.lease_expires_at = now_local() - timedelta(minutes=1)
+        db.commit()
+
+    response = client.post(
+        "/api/v1/operation/messages/msg_expired_api/claim",
+        json={"operator_id": "operator_b"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert response.json()["data"]["status"] == OP_CLAIMED
+    assert response.json()["data"]["assignee_id"] == "operator_b"
 
 
 def test_message_summary_returns_unpaginated_mine_count_without_changing_global_counts(
