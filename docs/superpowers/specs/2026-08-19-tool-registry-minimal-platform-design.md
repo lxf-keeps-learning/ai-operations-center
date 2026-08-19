@@ -253,14 +253,14 @@ Registry 使用进程内只读缓存：
 
 本期提供仅管理员可访问的后端管理 API，不新增管理页面：
 
-- `GET /api/tool-registry/tools`
-- `POST /api/tool-registry/tools`
-- `PATCH /api/tool-registry/tools/{tool_key}`
-- `POST /api/tool-registry/tools/{tool_key}/versions`
-- `POST /api/tool-registry/tools/{tool_key}/versions/{version}/publish`
-- `POST /api/tool-registry/tools/{tool_key}/versions/{version}/retire`
-- `PUT /api/tool-registry/tools/{tool_key}/policies`
-- `GET /api/tool-registry/audits`
+- `GET /api/v1/tool-registry/tools`
+- `POST /api/v1/tool-registry/tools`
+- `PATCH /api/v1/tool-registry/tools/{tool_key}`
+- `POST /api/v1/tool-registry/tools/{tool_key}/versions`
+- `POST /api/v1/tool-registry/tools/{tool_key}/versions/{version}/publish`
+- `POST /api/v1/tool-registry/tools/{tool_key}/versions/{version}/retire`
+- `PUT /api/v1/tool-registry/tools/{tool_key}/policies`
+- `GET /api/v1/tool-registry/audits`
 
 管理操作记录操作人和变更时间。发布操作必须原子校验：
 
