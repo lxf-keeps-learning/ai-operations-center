@@ -9,6 +9,7 @@
 """
 
 from functools import lru_cache
+from typing import Literal
 
 from app.config.settings import settings as _legacy_settings
 from app.core.config.env import current_env, env_file_path, is_dev, is_prod, is_test
@@ -68,6 +69,31 @@ class AppSettings:
     @property
     def redis_url(self) -> str:
         return self._inner.redis_url
+
+    # ── Tool Registry ───────────────────────
+    @property
+    def tool_registry_mode(self) -> Literal["legacy", "database"]:
+        return self._inner.tool_registry_mode
+
+    @property
+    def tool_registry_cache_ttl_seconds(self) -> int:
+        return self._inner.tool_registry_cache_ttl_seconds
+
+    @property
+    def tool_registry_stale_query_ttl_seconds(self) -> int:
+        return self._inner.tool_registry_stale_query_ttl_seconds
+
+    @property
+    def tool_default_rate_limit_per_minute(self) -> int:
+        return self._inner.tool_default_rate_limit_per_minute
+
+    @property
+    def tool_confirmation_ttl_seconds(self) -> int:
+        return self._inner.tool_confirmation_ttl_seconds
+
+    @property
+    def tool_confirmation_secret(self) -> str:
+        return self._inner.tool_confirmation_secret
 
     # ── 环境判断 ────────────────────────────
     @property
