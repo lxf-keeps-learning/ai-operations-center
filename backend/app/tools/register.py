@@ -1,5 +1,7 @@
 from app.integrations.ioc.mock_client import MockIocApiClient
 from app.tool_center.registry import registry
+from app.tool_registry.executor_catalog import executor_catalog
+from app.tool_registry.seed import BUILTIN_TOOLS
 from app.tools.action.work_order_draft_tool import WorkOrderDraftActionTool
 from app.tools.analysis.ioc_summary_tool import IocSummaryAnalysisTool
 from app.tools.query.alarm_tool import AlarmQueryTool
@@ -16,9 +18,17 @@ def register_all_tools() -> None:
     """
 
     client = MockIocApiClient()
-    registry.register(KpiQueryTool(client=client))
-    registry.register(AlarmQueryTool(client=client))
-    registry.register(RiskQueryTool(client=client))
-    registry.register(WorkOrderQueryTool(client=client))
-    registry.register(IocSummaryAnalysisTool())
-    registry.register(WorkOrderDraftActionTool(client=client))
+    tools = {
+        "kpi_query": KpiQueryTool(client=client),
+        "alarm_query": AlarmQueryTool(client=client),
+        "risk_query": RiskQueryTool(client=client),
+        "work_order_query": WorkOrderQueryTool(client=client),
+        "ioc_summary_analysis": IocSummaryAnalysisTool(),
+        "work_order_draft": WorkOrderDraftActionTool(client=client),
+    }
+
+    executor_catalog.clear()
+    for builtin in BUILTIN_TOOLS:
+        tool = tools[builtin.tool_key]
+        registry.register(tool)
+        executor_catalog.register(builtin.implementation_ref, tool)
