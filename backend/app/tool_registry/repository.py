@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from types import MappingProxyType
 from typing import Any, cast
 
 from sqlalchemy import func, select
@@ -34,6 +33,70 @@ class AuditFilters:
     role: str | None = None
     decision: str | None = None
     status: str | None = None
+
+
+class FrozenDict(dict[str, object]):
+    def __delitem__(self, key: str) -> None:
+        raise TypeError("frozen schema mappings are immutable")
+
+    def __ior__(self, other: object) -> "FrozenDict":
+        raise TypeError("frozen schema mappings are immutable")
+
+    def __setitem__(self, key: str, value: object) -> None:
+        raise TypeError("frozen schema mappings are immutable")
+
+    def clear(self) -> None:
+        raise TypeError("frozen schema mappings are immutable")
+
+    def pop(self, key: str, default: object = None) -> object:
+        raise TypeError("frozen schema mappings are immutable")
+
+    def popitem(self) -> tuple[str, object]:
+        raise TypeError("frozen schema mappings are immutable")
+
+    def setdefault(self, key: str, default: object = None) -> object:
+        raise TypeError("frozen schema mappings are immutable")
+
+    def update(self, *args: object, **kwargs: object) -> None:
+        raise TypeError("frozen schema mappings are immutable")
+
+
+class FrozenList(list[object]):
+    def __delitem__(self, index: int | slice) -> None:
+        raise TypeError("frozen schema arrays are immutable")
+
+    def __iadd__(self, other: object) -> "FrozenList":
+        raise TypeError("frozen schema arrays are immutable")
+
+    def __imul__(self, other: object) -> "FrozenList":
+        raise TypeError("frozen schema arrays are immutable")
+
+    def __setitem__(self, index: int | slice, value: object) -> None:
+        raise TypeError("frozen schema arrays are immutable")
+
+    def append(self, value: object) -> None:
+        raise TypeError("frozen schema arrays are immutable")
+
+    def clear(self) -> None:
+        raise TypeError("frozen schema arrays are immutable")
+
+    def extend(self, values: object) -> None:
+        raise TypeError("frozen schema arrays are immutable")
+
+    def insert(self, index: int, value: object) -> None:
+        raise TypeError("frozen schema arrays are immutable")
+
+    def pop(self, index: int = -1) -> object:
+        raise TypeError("frozen schema arrays are immutable")
+
+    def remove(self, value: object) -> None:
+        raise TypeError("frozen schema arrays are immutable")
+
+    def reverse(self) -> None:
+        raise TypeError("frozen schema arrays are immutable")
+
+    def sort(self, *args: object, **kwargs: object) -> None:
+        raise TypeError("frozen schema arrays are immutable")
 
 
 class ToolRegistryRepository:
@@ -263,9 +326,9 @@ def _freeze_json_mapping(value: Mapping[str, Any]) -> Mapping[str, object]:
 
 def _freeze_json_value(value: Any) -> object:
     if isinstance(value, Mapping):
-        return MappingProxyType(
+        return FrozenDict(
             {str(key): _freeze_json_value(item) for key, item in value.items()}
         )
     if isinstance(value, list | tuple):
-        return tuple(_freeze_json_value(item) for item in value)
+        return FrozenList(_freeze_json_value(item) for item in value)
     return value
