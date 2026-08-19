@@ -138,6 +138,11 @@ def test_tool_policy_indexes_cover_specificity_lookup() -> None:
     assert indexes["ix_tool_policies_enabled"] == ("enabled",)
 
 
+def test_rollout_percentage_is_stored_only_on_policies() -> None:
+    assert "gray_percentage" not in ToolVersion.__table__.c.keys()
+    assert "gray_percentage" in ToolPolicy.__table__.c.keys()
+
+
 def test_deleting_a_definition_cascades_versions_and_policies_but_keeps_audits(
     session: Session,
 ) -> None:

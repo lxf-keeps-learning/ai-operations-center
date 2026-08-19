@@ -50,7 +50,6 @@ class ToolVersionRecord:
     output_schema: dict[str, Any]
     status: VersionStatus
     is_stable: bool
-    gray_percentage: int | None = None
 
 
 @dataclass(frozen=True)
@@ -62,6 +61,7 @@ class ToolPolicyRecord:
     role: str | None
     decision: GovernanceDecision
     rate_limit_per_minute: int
+    gray_percentage: int
     requires_confirmation: bool
     enabled: bool
 
