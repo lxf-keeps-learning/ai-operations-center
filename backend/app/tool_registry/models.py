@@ -3,7 +3,18 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -13,6 +24,13 @@ from app.utils.timezone import now_local
 class ToolDefinition(Base):
     __tablename__ = "tool_definitions"
     __table_args__ = (
+        CheckConstraint(
+            "tool_type IN ('query', 'analysis', 'action') AND ("
+            "(tool_type IN ('query', 'analysis') AND action_phase IS NULL) OR "
+            "(tool_type = 'action' AND action_phase IS NOT NULL AND action_phase IN ('prepare', 'commit'))"
+            ")",
+            name="ck_tool_definitions_type_phase",
+        ),
         Index("ix_tool_definitions_tool_key", "tool_key", unique=True),
         Index("ix_tool_definitions_capability", "capability", unique=True),
         Index("ix_tool_definitions_enabled", "enabled"),
@@ -53,6 +71,10 @@ class ToolDefinition(Base):
 class ToolVersion(Base):
     __tablename__ = "tool_versions"
     __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'published', 'retired')",
+            name="ck_tool_versions_status",
+        ),
         UniqueConstraint("tool_id", "version", name="uk_tool_version"),
         Index("ix_tool_versions_tool_id_status", "tool_id", "status"),
         Index("ix_tool_versions_tool_id_status_stable", "tool_id", "status", "is_stable"),

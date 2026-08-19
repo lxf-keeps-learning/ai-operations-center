@@ -88,6 +88,85 @@ def test_tool_definition_and_version_constraints(session: Session) -> None:
         session.commit()
 
 
+def test_tool_version_rejects_status_outside_publish_lifecycle(session: Session) -> None:
+    """Removing the status guard would persist unreachable version lifecycle states."""
+    tool = ToolDefinition(
+        tool_key="inventory_query",
+        capability="query.inventory",
+        name="Inventory query",
+        description="Fetch inventory status",
+        tool_type="query",
+        action_phase=None,
+        enabled=True,
+    )
+    session.add(tool)
+    session.flush()
+    session.add(
+        ToolVersion(
+            tool_id=tool.id,
+            version="2.0.0",
+            implementation_ref="builtin.inventory.query",
+            input_schema={"type": "object"},
+            output_schema={"type": "object"},
+            status="invalid",
+            is_stable=False,
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_tool_definition_rejects_invalid_type_and_action_phase_combinations(session: Session) -> None:
+    """Dropping the definition invariant would allow action routing states the runtime cannot interpret."""
+    session.add(
+        ToolDefinition(
+            tool_key="bad_query",
+            capability="query.bad",
+            name="Bad query",
+            description="Invalid query/action phase pairing",
+            tool_type="query",
+            action_phase="prepare",
+            enabled=True,
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+    session.rollback()
+    session.add(
+        ToolDefinition(
+            tool_key="bad_action",
+            capability="action.bad",
+            name="Bad action",
+            description="Missing action phase",
+            tool_type="action",
+            action_phase=None,
+            enabled=True,
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+    session.rollback()
+    session.add(
+        ToolDefinition(
+            tool_key="bad_type",
+            capability="custom.bad",
+            name="Bad type",
+            description="Unknown tool type",
+            tool_type="custom",
+            action_phase=None,
+            enabled=True,
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
 def test_tool_call_audit_allows_unresolved_tool_reference(session: Session) -> None:
     """Removing nullable audit references would break resolution-failure traces."""
     session.add(
@@ -141,6 +220,8 @@ def test_tool_policy_indexes_cover_specificity_lookup() -> None:
 def test_rollout_percentage_is_stored_only_on_policies() -> None:
     assert "gray_percentage" not in ToolVersion.__table__.c.keys()
     assert "gray_percentage" in ToolPolicy.__table__.c.keys()
+    assert any(constraint.name == "ck_tool_versions_status" for constraint in ToolVersion.__table__.constraints)
+    assert any(constraint.name == "ck_tool_definitions_type_phase" for constraint in ToolDefinition.__table__.constraints)
 
 
 def test_deleting_a_definition_cascades_versions_and_policies_but_keeps_audits(
