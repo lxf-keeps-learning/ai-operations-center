@@ -151,6 +151,65 @@ def test_load_snapshot_filters_runtime_rows_and_returns_immutable_records(sessio
     assert snapshot.policies[0].gray_percentage == 25
 
 
+def test_load_snapshot_freezes_schema_values_without_mutating_orm_json(session: Session) -> None:
+    tool = _tool_definition(tool_key="schema_query", capability="query.schema")
+    session.add(tool)
+    session.flush()
+    original_input_schema = {
+        "type": "object",
+        "required": ["filters"],
+        "properties": {
+            "filters": {
+                "type": "array",
+                "items": {"type": "string"},
+            }
+        },
+    }
+    original_output_schema = {
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "items": {"type": "object"},
+            }
+        },
+    }
+    version = ToolVersion(
+        tool_id=tool.id,
+        version="1.0.0",
+        implementation_ref="builtin.schema_query",
+        input_schema=original_input_schema,
+        output_schema=original_output_schema,
+        status="published",
+        is_stable=True,
+    )
+    session.add(version)
+    session.commit()
+
+    snapshot = ToolRegistryRepository(session).load_snapshot()
+    frozen_input_schema = snapshot.versions[0].input_schema
+    frozen_output_schema = snapshot.versions[0].output_schema
+
+    assert frozen_input_schema is not version.input_schema
+    assert frozen_output_schema is not version.output_schema
+    assert frozen_input_schema["required"] is not version.input_schema["required"]
+    assert frozen_input_schema["properties"] is not version.input_schema["properties"]
+
+    with pytest.raises(TypeError):
+        frozen_input_schema["title"] = "mutated"
+
+    with pytest.raises(TypeError):
+        frozen_input_schema["properties"]["filters"]["type"] = "object"
+
+    with pytest.raises(AttributeError):
+        frozen_input_schema["required"].append("tenant_id")
+
+    assert version.input_schema == original_input_schema
+    assert version.output_schema == original_output_schema
+    assert isinstance(version.input_schema["required"], list)
+    assert version.input_schema["properties"]["filters"]["type"] == "array"
+
+
 def test_append_list_and_update_audit_preserves_history(session: Session) -> None:
     tool = _tool_definition(tool_key="risk_query", capability="query.risk")
     session.add(tool)

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Any, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -232,8 +235,8 @@ class ToolRegistryRepository:
             tool_id=version.tool_id,
             version=version.version,
             implementation_ref=version.implementation_ref,
-            input_schema=version.input_schema,
-            output_schema=version.output_schema,
+            input_schema=_freeze_json_mapping(version.input_schema),
+            output_schema=_freeze_json_mapping(version.output_schema),
             status=VersionStatus(version.status),
             is_stable=version.is_stable,
         )
@@ -251,3 +254,18 @@ class ToolRegistryRepository:
             requires_confirmation=policy.requires_confirmation,
             enabled=policy.enabled,
         )
+
+
+def _freeze_json_mapping(value: Mapping[str, Any]) -> Mapping[str, object]:
+    frozen = _freeze_json_value(dict(value))
+    return cast(Mapping[str, object], frozen)
+
+
+def _freeze_json_value(value: Any) -> object:
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {str(key): _freeze_json_value(item) for key, item in value.items()}
+        )
+    if isinstance(value, list | tuple):
+        return tuple(_freeze_json_value(item) for item in value)
+    return value

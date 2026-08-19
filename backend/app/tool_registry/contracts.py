@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -46,8 +47,8 @@ class ToolVersionRecord:
     tool_id: int
     version: str
     implementation_ref: str
-    input_schema: dict[str, Any]
-    output_schema: dict[str, Any]
+    input_schema: Mapping[str, object]
+    output_schema: Mapping[str, object]
     status: VersionStatus
     is_stable: bool
 
@@ -77,8 +78,8 @@ class ToolDescriptor:
     action_phase: ActionPhase | None
     version_id: int
     version: str
-    input_schema: dict[str, Any]
-    output_schema: dict[str, Any]
+    input_schema: Mapping[str, object]
+    output_schema: Mapping[str, object]
     rate_limit_per_minute: int
     selected_stable: bool
 
