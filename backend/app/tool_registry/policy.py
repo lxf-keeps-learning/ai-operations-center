@@ -9,7 +9,7 @@ from app.tool_registry.contracts import GovernanceDecision, ToolPolicyRecord
 
 @dataclass(frozen=True)
 class EffectivePolicy:
-    policy_id: int
+    policy_id: int | None
     decision: GovernanceDecision
     rate_limit_per_minute: int
     gray_percentage: int

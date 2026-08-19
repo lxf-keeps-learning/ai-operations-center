@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from sqlalchemy import func, select
@@ -18,7 +19,6 @@ from app.tool_registry.contracts import (
     VersionStatus,
 )
 from app.tool_registry.models import ToolCallAudit, ToolDefinition, ToolPolicy, ToolVersion
-from app.utils.timezone import now_local
 
 
 @dataclass(frozen=True)
@@ -205,7 +205,7 @@ class ToolRegistryRepository:
         definition_records = tuple(self._to_definition_record(definition) for definition in definitions)
         version_records = tuple(self._to_version_record(version) for version in versions)
         policy_records = tuple(self._to_policy_record(policy) for policy in policies)
-        loaded_at = now_local()
+        loaded_at = datetime.now(UTC)
 
         return RegistrySnapshot(
             revision=f"{loaded_at.isoformat()}:{len(definition_records)}:{len(version_records)}:{len(policy_records)}",
