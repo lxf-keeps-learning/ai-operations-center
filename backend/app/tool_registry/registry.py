@@ -117,6 +117,7 @@ class DatabaseToolRegistry:
             rate_limit_per_minute=effective_policy.rate_limit_per_minute,
             gray_bucket=selection.gray_bucket,
             selected_stable=selection.selected_stable,
+            requires_confirmation=effective_policy.requires_confirmation,
         )
 
     def discover(

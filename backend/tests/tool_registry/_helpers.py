@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+import sqlite3
 
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.db.base import Base
+from app.tool_center.base_tool import BaseTool
+from app.tool_registry.confirmation import ConfirmationService
 from app.tool_registry.contracts import (
     ActionPhase,
     GovernanceDecision,
@@ -13,6 +21,12 @@ from app.tool_registry.contracts import (
     ToolVersionRecord,
     VersionStatus,
 )
+from app.tool_registry.executor_catalog import ExecutorCatalog
+from app.tool_registry.gateway import ToolGateway
+from app.tool_registry.models import ToolDefinition, ToolPolicy, ToolVersion
+from app.tool_registry.rate_limit import InMemoryFixedWindowRateLimiter, RateLimiter
+from app.tool_registry.registry import DatabaseToolRegistry
+from app.tool_registry.repository import ToolRegistryRepository
 
 
 class FakeClock:
@@ -131,3 +145,109 @@ class SnapshotLoader:
             versions=tuple(self.versions),
             policies=tuple(self.policies),
         )
+
+
+def _enable_foreign_keys(dbapi_connection: sqlite3.Connection, _record: object) -> None:
+    dbapi_connection.execute("PRAGMA foreign_keys = ON")
+
+
+def make_sqlite_session_factory() -> sessionmaker:
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    event.listen(engine, "connect", _enable_foreign_keys)
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine, expire_on_commit=False)
+
+
+def build_gateway(
+    definitions: Sequence[ToolDefinitionRecord],
+    versions: Sequence[ToolVersionRecord],
+    policies: Sequence[ToolPolicyRecord],
+    *,
+    executors: dict[str, BaseTool],
+    rate_limiter: RateLimiter | None = None,
+    session_factory: sessionmaker | None = None,
+    repository_factory=None,
+    confirmation_secret: str = "unit-test-secret",
+    clock: FakeClock | None = None,
+) -> tuple[ToolGateway, SnapshotLoader, sessionmaker | None]:
+    clock = clock or FakeClock()
+    loader = SnapshotLoader(definitions, versions, policies, clock=clock)
+    registry = DatabaseToolRegistry(
+        loader,
+        cache_ttl_seconds=30,
+        stale_query_ttl_seconds=86400,
+        clock=clock,
+    )
+    session_factory = session_factory or make_sqlite_session_factory()
+    _seed_registry_rows(session_factory, definitions, versions, policies)
+    if repository_factory is None:
+        repository_factory = lambda: ToolRegistryRepository(session_factory())
+    catalog = ExecutorCatalog()
+    for ref, tool in executors.items():
+        catalog.register(ref, tool)
+    gateway = ToolGateway(
+        registry=registry,
+        executors=catalog,
+        rate_limiter=rate_limiter or InMemoryFixedWindowRateLimiter(),
+        repository_factory=repository_factory,
+        confirmation_service=ConfirmationService(secret=confirmation_secret, ttl_seconds=300),
+        clock=clock,
+    )
+    return gateway, loader, session_factory
+
+
+def _seed_registry_rows(
+    session_factory: sessionmaker,
+    definitions: Sequence[ToolDefinitionRecord],
+    versions: Sequence[ToolVersionRecord],
+    policies: Sequence[ToolPolicyRecord],
+) -> None:
+    with session_factory() as session:
+        for definition in definitions:
+            session.add(
+                ToolDefinition(
+                    id=definition.id,
+                    tool_key=definition.tool_key,
+                    capability=definition.capability,
+                    name=definition.name,
+                    description=definition.description,
+                    tool_type=definition.tool_type.value,
+                    action_phase=(
+                        definition.action_phase.value if definition.action_phase else None
+                    ),
+                    enabled=definition.enabled,
+                )
+            )
+        for version in versions:
+            session.add(
+                ToolVersion(
+                    id=version.id,
+                    tool_id=version.tool_id,
+                    version=version.version,
+                    implementation_ref=version.implementation_ref,
+                    input_schema=dict(version.input_schema),
+                    output_schema=dict(version.output_schema),
+                    status=version.status.value,
+                    is_stable=version.is_stable,
+                )
+            )
+        for policy in policies:
+            session.add(
+                ToolPolicy(
+                    id=policy.id,
+                    tool_id=policy.tool_id,
+                    version_id=policy.version_id,
+                    tenant_id=policy.tenant_id,
+                    role=policy.role,
+                    decision=policy.decision.value,
+                    rate_limit_per_minute=policy.rate_limit_per_minute,
+                    gray_percentage=policy.gray_percentage,
+                    requires_confirmation=policy.requires_confirmation,
+                    enabled=policy.enabled,
+                )
+            )
+        session.commit()

@@ -107,3 +107,4 @@ class ResolvedTool:
     rate_limit_per_minute: int
     gray_bucket: int | None
     selected_stable: bool
+    requires_confirmation: bool = False
