@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import IntEnum
 
 from app.tool_center.contracts import ToolContext
 from app.tool_registry.contracts import GovernanceDecision, ToolPolicyRecord
@@ -15,20 +16,32 @@ class EffectivePolicy:
     requires_confirmation: bool
 
 
+class PolicyRank(IntEnum):
+    VERSION_TENANT_ROLE = 4
+    VERSION_DEFAULT = 3
+    TOOL_TENANT_ROLE = 2
+    TOOL_DEFAULT = 1
+
+
 def resolve_policy(
     policies: tuple[ToolPolicyRecord, ...] | list[ToolPolicyRecord],
     version_id: int,
     context: ToolContext,
 ) -> EffectivePolicy:
-    matches = [
-        policy
-        for policy in policies
-        if _matches(policy, version_id=version_id, context=context)
-    ]
+    matches = []
+    for policy in policies:
+        rank = _match_rank(policy, version_id=version_id, context=context)
+        if rank is not None:
+            matches.append((rank, policy))
     if not matches:
         raise ValueError(f"no matching policy for version_id={version_id}")
 
-    winner = sorted(matches, key=_sort_key, reverse=True)[0]
+    resolved_rank = max(rank for rank, _policy in matches)
+    resolved_candidates = [policy for rank, policy in matches if rank == resolved_rank]
+    deny_candidates = [
+        policy for policy in resolved_candidates if policy.decision is GovernanceDecision.DENY
+    ]
+    winner = max(deny_candidates or resolved_candidates, key=lambda policy: policy.id)
     return EffectivePolicy(
         policy_id=winner.id,
         decision=winner.decision,
@@ -38,19 +51,34 @@ def resolve_policy(
     )
 
 
-def _matches(policy: ToolPolicyRecord, *, version_id: int, context: ToolContext) -> bool:
-    return (
-        (policy.version_id is None or policy.version_id == version_id)
-        and (policy.tenant_id is None or policy.tenant_id == context.tenant_id)
-        and (policy.role is None or policy.role == context.role)
-    )
+def _match_rank(
+    policy: ToolPolicyRecord,
+    *,
+    version_id: int,
+    context: ToolContext,
+) -> PolicyRank | None:
+    if (
+        policy.version_id == version_id
+        and policy.tenant_id == context.tenant_id
+        and policy.role == context.role
+        and context.tenant_id is not None
+        and context.role is not None
+    ):
+        return PolicyRank.VERSION_TENANT_ROLE
 
+    if policy.version_id == version_id and policy.tenant_id is None and policy.role is None:
+        return PolicyRank.VERSION_DEFAULT
 
-def _sort_key(policy: ToolPolicyRecord) -> tuple[int, int, int, int, int]:
-    return (
-        int(policy.version_id is not None),
-        int(policy.tenant_id is not None),
-        int(policy.role is not None),
-        int(policy.decision is GovernanceDecision.DENY),
-        -policy.id,
-    )
+    if (
+        policy.version_id is None
+        and policy.tenant_id == context.tenant_id
+        and policy.role == context.role
+        and context.tenant_id is not None
+        and context.role is not None
+    ):
+        return PolicyRank.TOOL_TENANT_ROLE
+
+    if policy.version_id is None and policy.tenant_id is None and policy.role is None:
+        return PolicyRank.TOOL_DEFAULT
+
+    return None

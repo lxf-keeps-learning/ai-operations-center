@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+import math
 from threading import Lock
 
 
@@ -36,7 +37,7 @@ class InMemoryFixedWindowRateLimiter(RateLimiter):
                 count = 0
 
             if count >= limit:
-                retry_after = max(0, int((next_boundary - current).total_seconds()))
+                retry_after = max(1, math.ceil((next_boundary - current).total_seconds()))
                 return RateLimitDecision(allowed=False, retry_after_seconds=retry_after)
 
             self._state[key] = (stored_window_start, count + 1)
