@@ -1,4 +1,5 @@
 from functools import cached_property
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -98,6 +99,12 @@ class Settings(BaseSettings):
         default="/mcp",
         description="MCP SSE Server 挂载路径",
     )
+    tool_registry_mode: Literal["legacy", "database"] = "legacy"
+    tool_registry_cache_ttl_seconds: int = Field(default=30, ge=1)
+    tool_registry_stale_query_ttl_seconds: int = Field(default=86400, ge=30)
+    tool_default_rate_limit_per_minute: int = Field(default=60, ge=1)
+    tool_confirmation_ttl_seconds: int = Field(default=300, ge=30)
+    tool_confirmation_secret: str = ""
 
     rag_query_rewrite_confidence_threshold: float = Field(
         default=0.65,

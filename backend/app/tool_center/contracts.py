@@ -11,7 +11,7 @@
 # 不是 HTTP API 的通用 DTO。API 层需要返回 ToolResult 时，应使用
 # app/core/schema 中的全局 ApiResponse 进行包装。
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -25,6 +25,7 @@ class ToolContext(BaseModel):
     user_id: str | None = None
     tenant_id: str | None = None
     role: str | None = None
+    caller_type: Literal["internal", "external"] = "external"
     request_id: str | None = None
     locale: str = "zh-CN"
 
