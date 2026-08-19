@@ -173,13 +173,14 @@ def build_gateway(
     repository_factory=None,
     confirmation_secret: str = "unit-test-secret",
     clock: FakeClock | None = None,
+    stale_query_ttl_seconds: int = 86400,
 ) -> tuple[ToolGateway, SnapshotLoader, sessionmaker | None]:
     clock = clock or FakeClock()
     loader = SnapshotLoader(definitions, versions, policies, clock=clock)
     registry = DatabaseToolRegistry(
         loader,
         cache_ttl_seconds=30,
-        stale_query_ttl_seconds=86400,
+        stale_query_ttl_seconds=stale_query_ttl_seconds,
         clock=clock,
     )
     session_factory = session_factory or make_sqlite_session_factory()
