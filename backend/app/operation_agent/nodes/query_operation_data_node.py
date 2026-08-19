@@ -1,7 +1,7 @@
 # Operation Graph 数据查询节点
 #
 # 这是 Tool Center 真正进入 Operation Graph 的关键入口：
-#   LangGraph → OperationState → query_operation_data_node → get_tool → await tool.run()
+#   LangGraph → OperationState → query_operation_data_node → get_tool → tool.run()
 #
 # 职责：
 #   1. 从 state 解析用户上下文（domain、department、time_range）
@@ -10,29 +10,30 @@
 #   4. 将原始数据和衍生指标写回 state，供下游 LLM 节点使用
 #
 # 设计要点：
-#   - Node 不直接 import 任何具体 Tool 类，只按名称经 get_tool 获取
+#   - Node 不直接 import 任何具体 Tool 类，只按 capability 经 execute_tool 调用
 #   - 切换 Mock ↔ 真实 IOC 只需改 register.py 中的 Client，本文件不动
-#   - 本节点为 async：tool.run 受 BaseTool 内建超时与 Deadline 取消约束，
-#     LangGraph 对 async Node 执行取消时取消会穿透到 Tool 协程
 #   - _run_tool 内部用 ToolResult 协议，不处理裸异常（BaseTool.run 已确保）
 
 from typing import Any
 
 from app.operation_agent.state import OperationState
-from app.tool_center.contracts import BaseToolInput, ToolContext, ToolResult
-from app.tool_center.registry import get_tool
+from app.tool_center.contracts import ToolContext, ToolResult
+from app.tool_registry.compat import CAPABILITY_TO_LEGACY_NAME, aexecute_tool
 
 # 支持的运营领域，用于分发到不同的查询逻辑。
 _SUPPORTED_DOMAINS = {"safety", "maintenance", "business", "capability", "all"}
 
-# 四个核心 Query Tool 的逻辑名称 → 注册名的映射。
-# Node 通过这里间接引用 Tool，不直接 import 具体类。
-_QUERY_TOOLS = {
-    "kpi": "kpi_query",
-    "alarm": "alarm_query",
-    "risk": "risk_query",
-    "work_order": "work_order_query",
+# 四个核心 Query Tool 的逻辑键 → capability 的映射。
+# Node 按能力请求 Tool，不依赖具体工具版本；版本解析与治理由 Registry/Gateway 完成。
+_QUERY_CAPABILITIES = {
+    "kpi": "query.kpi",
+    "alarm": "query.alarm",
+    "risk": "query.risk",
+    "work_order": "query.work_order",
 }
+
+# 聚合分析能力。
+_SUMMARY_CAPABILITY = "analysis.ioc_summary"
 
 # business / capability 领域的快照数据（Sprint3 Mock）。
 # 这两个领域暂不依赖真实 IOC 接口，直接返回预置指标。
@@ -140,10 +141,10 @@ async def _query_operation_snapshot(state: OperationState, errors: list[dict]) -
     context = _tool_context(state)
     filters = _build_tool_filters(state)
 
-    # 依次调用四个 Query Tool，将结果写入 state.raw_data
+    # 依次按 capability 请求四个 Query Tool，将结果写入 state.raw_data
     tool_data: dict[str, dict[str, Any]] = {}
-    for key, tool_name in _QUERY_TOOLS.items():
-        result = await _run_tool(tool_name, filters.get(key, {}), context, errors)
+    for key, capability in _QUERY_CAPABILITIES.items():
+        result = await _run_tool(capability, filters.get(key, {}), context, errors)
         if not result or not result.success:
             continue
 
@@ -151,14 +152,14 @@ async def _query_operation_snapshot(state: OperationState, errors: list[dict]) -
         tool_data[key] = data
         raw_data[key] = data
         raw_data[f"{key}_items"] = data.get("items", [])
-        evidence.extend(_serialize_evidence(result, tool_name))
+        evidence.extend(_serialize_evidence(result, _evidence_label(result, capability)))
 
     # 四个 Query 都执行完毕后，调用聚合分析 Tool
     if tool_data:
         summary = await _run_summary_tool(tool_data, context, errors)
         if summary and summary.success and isinstance(summary.data, dict):
             raw_data["ioc_summary"] = summary.data
-            evidence.extend(_serialize_evidence(summary, "ioc_summary_analysis"))
+            evidence.extend(_serialize_evidence(summary, _evidence_label(summary, _SUMMARY_CAPABILITY)))
 
     state["metrics"] = _build_metrics(raw_data)
     state["evidence"] = [*state.get("evidence", []), *evidence]
@@ -196,35 +197,31 @@ def _load_domain_snapshot(state: OperationState, domain: str) -> None:
 
 
 async def _run_tool(
-    tool_name: str,
+    capability: str,
     filters: dict[str, Any],
     context: ToolContext,
     errors: list[dict],
 ) -> ToolResult | None:
-    """通过 Tool Registry 获取并执行一个 Tool。
+    """通过统一 Tool Gateway 按 capability 执行一个 Tool。
 
     这里不直接 import 具体 Tool 类，不关心 Client 是 Mock 还是 Real。
+    legacy 模式由适配层回退旧 Registry，database 模式走治理链路。
     所有异常都被 BaseTool.run 统一包装为 ToolResult，Node 只处理 ToolResult 协议。
     """
     try:
-        tool = get_tool(tool_name)
+        result = await aexecute_tool(capability, filters, context)
     except Exception as e:
-        errors.append({"node": "query_operation_data", "message": f"获取 {tool_name} Tool 失败: {e}"})
+        errors.append({"node": "query_operation_data", "message": f"获取 {capability} Tool 失败: {e}"})
         return None
 
-    try:
-        result = await tool.run(BaseToolInput(context=context, filters=filters))
-        if not result.success:
-            errors.append(
-                {
-                    "node": "query_operation_data",
-                    "message": f"{tool_name} 调用失败: {_tool_error_message(result)}",
-                }
-            )
-        return result
-    except Exception as e:
-        errors.append({"node": "query_operation_data", "message": f"{tool_name} 调用异常: {e}"})
-        return None
+    if not result.success:
+        errors.append(
+            {
+                "node": "query_operation_data",
+                "message": f"{capability} 调用失败: {_tool_error_message(result)}",
+            }
+        )
+    return result
 
 
 async def _run_summary_tool(
@@ -232,9 +229,9 @@ async def _run_summary_tool(
     context: ToolContext,
     errors: list[dict],
 ) -> ToolResult | None:
-    """将四个 Query Tool 的 data 传给 IocSummaryAnalysisTool 做聚合分析。"""
+    """将四个 Query Tool 的 data 传给聚合分析能力。"""
     return await _run_tool(
-        "ioc_summary_analysis",
+        _SUMMARY_CAPABILITY,
         {
             "kpi_data": tool_data.get("kpi", {}),
             "alarm_data": tool_data.get("alarm", {}),
@@ -246,16 +243,28 @@ async def _run_summary_tool(
     )
 
 
+def _evidence_label(result: ToolResult, capability: str) -> str:
+    """证据标签优先使用治理结果中的选定 tool_key，保证报告内容与旧实现一致。"""
+    tool_key = result.metadata.get("tool_key") if result.metadata else None
+    return tool_key or CAPABILITY_TO_LEGACY_NAME.get(capability, capability)
+
+
 def _tool_context(state: OperationState) -> ToolContext:
     """从 OperationState 提取用户上下文，组装为 ToolContext。
 
+    Graph 内部调用属于受信链路，标记 caller_type=internal。
     request_id 使用 state 中的 trace_id，确保 Tool 层的 trace 与请求链路一致。
     """
     user_context = state.get("user_context", {})
+    roles = user_context.get("roles")
+    role = user_context.get("role")
+    if role is None and isinstance(roles, list) and roles:
+        role = roles[0]
     return ToolContext(
         user_id=user_context.get("user_id") or user_context.get("userId"),
         tenant_id=user_context.get("tenant_id") or user_context.get("tenantId"),
-        role=user_context.get("role"),
+        role=role,
+        caller_type="internal",
         request_id=state.get("trace_id"),
     )
 
@@ -265,7 +274,7 @@ def _build_tool_filters(state: OperationState) -> dict[str, dict[str, Any]]:
     page = state.get("page_context", {})
     domain = page.get("domain") or state.get("domain", "safety")
     department = page.get("department")
-    filters: dict[str, dict[str, Any]] = {key: {} for key in _QUERY_TOOLS}
+    filters: dict[str, dict[str, Any]] = {key: {} for key in _QUERY_CAPABILITIES}
 
     # 根据 domain 分配默认 department / alarm_type
     if domain == "safety" and not department:

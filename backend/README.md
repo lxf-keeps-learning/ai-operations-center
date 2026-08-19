@@ -516,3 +516,29 @@ LANGSMITH_MASK_INPUTS_OUTPUTS=true
 - 继续完善 Tool 子 Run 的输入输出摘要、Evidence 评估和生产告警规则。
 - 实现 `RealIocApiClient` 与环境化装配，并增加超时、重试、熔断和依赖健康检查。
 - 将 Action Draft 接入“前端展示 -> 人工确认 -> 后端二次校验 -> 真实执行 -> 审计”闭环。
+
+## Tool Registry 平台化闭环
+
+工具发现与治理由 MySQL 持久化配置驱动：Agent/MCP/API 按 `capability` 请求能力，`DatabaseToolRegistry` 解析版本（稳定/灰度），`ToolGateway` 统一执行权限、限流、动作确认与审计。旧工具名通过兼容适配器映射，`TOOL_REGISTRY_MODE=legacy` 可随时回退。
+
+### 上线步骤
+
+```bash
+cd backend
+.venv/bin/alembic upgrade head
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/seed_tool_registry.py
+# 验证管理 API 与审计记录后切换：
+TOOL_REGISTRY_MODE=database
+# 回滚（无数据损失）：
+TOOL_REGISTRY_MODE=legacy
+```
+
+- 管理 API：`/api/v1/tool-registry/*`（仅 `X-Roles: admin`），支持工具/版本 CRUD、稳定与灰度发布、退役、策略替换与审计查询。
+- 配置缓存 TTL 30 秒，管理操作提交后主动失效缓存；查询/分析稳定快照最多使用 24 小时，动作类工具在缓存过期后拒绝执行。
+- 默认限流为每版本每租户每分钟 60 次，**进程内固定窗口**实现：单实例准确，多 worker 部署时按进程计额度，生产全局配额需后续引入 Redis 分布式限流。
+- `action/commit` 始终要求人工确认（HMAC 签名挑战），确认重试必须复用挑战请求的 `X-Trace-Id`；挑战含随机 nonce，验证成功后由数据库唯一令牌哈希原子消费，重复提交不会再次执行；`action/prepare` 只生成待确认草稿。
+- 灰度比例存于版本并只控制流量，灰度候选与稳定版本分别执行授权；发布灰度版本不会自动创建 allow 策略。
+- seed 仅补齐完全缺失的定义/初始版本/策略，不恢复已禁用、退役或 deny 的受治理状态。
+- 审计只保存参数哈希与递归脱敏摘要，并保留工具/版本/策略决策快照；普通审计写入失败不影响工具结果，但确认令牌消费持久化失败会在副作用前 fail closed。
+
+相关配置：`TOOL_REGISTRY_MODE`、`TOOL_REGISTRY_CACHE_TTL_SECONDS`、`TOOL_REGISTRY_STALE_QUERY_TTL_SECONDS`、`TOOL_DEFAULT_RATE_LIMIT_PER_MINUTE`、`TOOL_CONFIRMATION_TTL_SECONDS`、`TOOL_CONFIRMATION_SECRET`。

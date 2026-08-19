@@ -55,26 +55,19 @@ def seed_builtin_tools(db: Session, operator_id: str = "system") -> None:
                 tool_type=builtin.tool_type,
                 action_phase=builtin.action_phase,
                 enabled=True,
+                created_by=operator_id,
+                updated_by=operator_id,
             )
             db.add(definition)
             db.flush()
-        else:
-            definition.capability = builtin.capability
-            definition.name = tool.name
-            definition.description = tool.description
-            definition.tool_type = builtin.tool_type
-            definition.action_phase = builtin.action_phase
-            definition.enabled = True
-            db.flush()
 
         input_schema, output_schema = _schemas_for_tool(builtin.tool_key)
-        version = db.scalar(
-            select(ToolVersion).where(
-                ToolVersion.tool_id == definition.id,
-                ToolVersion.version == "1.0.0",
+        versions = list(
+            db.scalars(
+                select(ToolVersion).where(ToolVersion.tool_id == definition.id)
             )
         )
-        if version is None:
+        if not versions:
             version = ToolVersion(
                 tool_id=definition.id,
                 version="1.0.0",
@@ -83,29 +76,21 @@ def seed_builtin_tools(db: Session, operator_id: str = "system") -> None:
                 output_schema=output_schema,
                 status="published",
                 is_stable=True,
+                gray_percentage=0,
                 published_at=seeded_at,
                 published_by=operator_id,
+                created_by=operator_id,
+                updated_by=operator_id,
             )
             db.add(version)
-        else:
-            version.implementation_ref = builtin.implementation_ref
-            version.input_schema = input_schema
-            version.output_schema = output_schema
-            version.status = "published"
-            version.is_stable = True
-            version.published_at = version.published_at or seeded_at
-            version.published_by = operator_id
-        db.flush()
+            db.flush()
 
-        policy = db.scalar(
-            select(ToolPolicy).where(
-                ToolPolicy.tool_id == definition.id,
-                ToolPolicy.version_id.is_(None),
-                ToolPolicy.tenant_id.is_(None),
-                ToolPolicy.role.is_(None),
+        policies = list(
+            db.scalars(
+                select(ToolPolicy).where(ToolPolicy.tool_id == definition.id)
             )
         )
-        if policy is None:
+        if not policies:
             policy = ToolPolicy(
                 tool_id=definition.id,
                 version_id=None,
@@ -119,14 +104,7 @@ def seed_builtin_tools(db: Session, operator_id: str = "system") -> None:
                 updated_by=operator_id,
             )
             db.add(policy)
-        else:
-            policy.decision = "allow"
-            policy.rate_limit_per_minute = 60
-            policy.gray_percentage = 0
-            policy.requires_confirmation = False
-            policy.enabled = True
-            policy.updated_by = operator_id
-        db.flush()
+            db.flush()
 
 
 def _build_builtin_tool_instances() -> dict[str, object]:

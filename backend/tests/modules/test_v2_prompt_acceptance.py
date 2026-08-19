@@ -52,7 +52,7 @@ def test_v2_migrations_form_one_resolvable_head() -> None:
     config = Config("alembic.ini")
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_heads() == ["20260806_0003"]
+    assert script.get_heads() == ["20260819_0005"]
     assert script.get_revision("20260728_0001").down_revision == "20260711_0006"
 
 
@@ -456,18 +456,14 @@ async def test_operation_graph_trace_receives_prompt_metadata(
         return {}
 
     monkeypatch.setattr(operation_service, "build_langsmith_config", fake_config)
-    async def fake_ainvoke(state, config=None, **_kwargs):
+    async def fake_ainvoke(state, config):
         return {
             **state,
             "final_answer": "ok",
             "errors": [],
         }
 
-    monkeypatch.setattr(
-        operation_service.operation_graph,
-        "ainvoke",
-        fake_ainvoke,
-    )
+    monkeypatch.setattr(operation_service.operation_graph, "ainvoke", fake_ainvoke)
     monkeypatch.setattr(
         operation_service,
         "save_analysis_result",

@@ -51,6 +51,7 @@ class ToolVersionRecord:
     output_schema: Mapping[str, object]
     status: VersionStatus
     is_stable: bool
+    gray_percentage: int = 0
 
 
 @dataclass(frozen=True)
@@ -107,3 +108,4 @@ class ResolvedTool:
     rate_limit_per_minute: int
     gray_bucket: int | None
     selected_stable: bool
+    requires_confirmation: bool = False

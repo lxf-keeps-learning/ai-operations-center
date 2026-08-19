@@ -1,8 +1,15 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.core.exception.error_code import NOT_FOUND
+from app.core.context.context_holder import clear_all, set_user_context
+from app.core.context.user_context import UserContext
+from app.core.exception.base_exception import AppException
+from app.core.exception.error_code import DB_CONNECTION_ERROR, FORBIDDEN, NOT_FOUND, RATE_LIMIT
 from app.main import app
+from app.tool_center.contracts import ToolContext, ToolError, ToolResult
+from app.tool_registry.contracts import ToolDescriptor as RegistryToolDescriptor, ToolType
+from app.tools import api as tools_api_module
+from app.tools.api import ToolCallRequest, call_tool
 
 
 @pytest.mark.anyio
@@ -23,6 +30,46 @@ async def test_tools_list_endpoint_returns_registered_tools() -> None:
         "work_order_draft",
         "work_order_query",
     }.issubset(names)
+
+
+@pytest.mark.anyio
+async def test_tools_list_database_mode_uses_governed_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(tools_api_module.settings, "tool_registry_mode", "database")
+    monkeypatch.setattr(
+        tools_api_module,
+        "discover_tools",
+        lambda context: [
+            RegistryToolDescriptor(
+                tool_id=7,
+                tool_key="visible_tool",
+                capability="query.visible",
+                name="visible_tool",
+                description="visible",
+                tool_type=ToolType.QUERY,
+                action_phase=None,
+                version_id=71,
+                version="2.0.0",
+                input_schema={"type": "object"},
+                output_schema={"type": "object"},
+                rate_limit_per_minute=60,
+                selected_stable=True,
+            )
+        ],
+        raising=False,
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(
+            "/api/v1/tools",
+            headers={"X-Org-Id": "tenant-a", "X-Roles": "operator"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == [
+        {"name": "visible_tool", "description": "visible"}
+    ]
 
 
 @pytest.mark.anyio
@@ -108,3 +155,190 @@ async def test_tools_call_endpoint_returns_404_for_missing_tool() -> None:
     assert response.status_code == 404
     assert payload["code"] == NOT_FOUND.code
     assert payload["success"] is False
+
+
+def _identity_test_cleanup() -> None:
+    clear_all()
+
+
+def test_call_tool_derives_identity_from_user_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[ToolContext] = []
+
+    def fake_execute(name_or_capability, arguments, context, confirmation_token=None, stable_only=False):
+        captured.append(context)
+        return ToolResult(success=True, data={"total": 1})
+
+    set_user_context(
+        UserContext(
+            user_id="u9",
+            username="nine",
+            org_id="org9",
+            roles=["operator", "viewer"],
+        )
+    )
+    monkeypatch.setattr(tools_api_module, "execute_tool", fake_execute)
+    try:
+        call_tool(
+            ToolCallRequest(
+                tool_name="kpi_query",
+                filters={},
+                # 请求体中的身份字段必须被忽略
+                context=ToolContext(
+                    user_id="spoofed",
+                    tenant_id="spoofed-org",
+                    role="admin",
+                    locale="en-US",
+                ),
+            )
+        )
+    finally:
+        _identity_test_cleanup()
+
+    assert captured[0].user_id == "u9"
+    assert captured[0].tenant_id == "org9"
+    assert captured[0].role == "operator"
+    assert captured[0].caller_type == "external"
+    assert captured[0].locale == "en-US"
+
+
+def test_call_tool_returns_confirmation_challenge_in_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_execute(name_or_capability, arguments, context, confirmation_token=None, stable_only=False):
+        return ToolResult(
+            success=False,
+            data=None,
+            error=ToolError(code="TOOL_CONFIRMATION_REQUIRED", message="confirm"),
+            metadata={"confirmation_token": "token-abc"},
+        )
+
+    monkeypatch.setattr(tools_api_module, "execute_tool", fake_execute)
+
+    response = call_tool(ToolCallRequest(tool_name="work_order_draft"))
+
+    assert response.code == 0
+    assert response.data["success"] is False
+    assert response.data["metadata"]["confirmation_token"] == "token-abc"
+
+
+def test_call_tool_maps_forbidden_to_403(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_execute(name_or_capability, arguments, context, confirmation_token=None, stable_only=False):
+        return ToolResult(
+            success=False,
+            error=ToolError(code="TOOL_FORBIDDEN", message="denied"),
+        )
+
+    monkeypatch.setattr(tools_api_module, "execute_tool", fake_execute)
+
+    with pytest.raises(AppException) as excinfo:
+        call_tool(ToolCallRequest(tool_name="kpi_query"))
+
+    assert excinfo.value.http_status == 403
+    assert excinfo.value.code == FORBIDDEN.code
+
+
+def test_call_tool_maps_rate_limited_to_429(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_execute(name_or_capability, arguments, context, confirmation_token=None, stable_only=False):
+        return ToolResult(
+            success=False,
+            error=ToolError(
+                code="TOOL_RATE_LIMITED",
+                message="too many",
+                detail={"retry_after_seconds": 12},
+            ),
+        )
+
+    monkeypatch.setattr(tools_api_module, "execute_tool", fake_execute)
+
+    with pytest.raises(AppException) as excinfo:
+        call_tool(ToolCallRequest(tool_name="kpi_query"))
+
+    assert excinfo.value.http_status == 429
+    assert excinfo.value.code == RATE_LIMIT.code
+    assert "12" in excinfo.value.message
+    assert excinfo.value.data == {"retry_after_seconds": 12}
+
+
+@pytest.mark.anyio
+async def test_tools_call_rate_limit_sets_retry_after_header_and_structured_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_execute(name_or_capability, arguments, context, confirmation_token=None, stable_only=False):
+        return ToolResult(
+            success=False,
+            error=ToolError(
+                code="TOOL_RATE_LIMITED",
+                message="too many",
+                detail={"retry_after_seconds": 12},
+            ),
+        )
+
+    monkeypatch.setattr(tools_api_module, "execute_tool", fake_execute)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/tools/call",
+            json={"tool_name": "kpi_query"},
+        )
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "12"
+    assert response.json()["data"] == {"retry_after_seconds": 12}
+
+
+def test_call_tool_maps_capability_unavailable_to_404(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_execute(name_or_capability, arguments, context, confirmation_token=None, stable_only=False):
+        return ToolResult(
+            success=False,
+            error=ToolError(code="TOOL_CAPABILITY_UNAVAILABLE", message="missing"),
+        )
+
+    monkeypatch.setattr(tools_api_module, "execute_tool", fake_execute)
+
+    with pytest.raises(AppException) as excinfo:
+        call_tool(ToolCallRequest(tool_name="missing_tool"))
+
+    assert excinfo.value.http_status == 404
+    assert excinfo.value.code == NOT_FOUND.code
+
+
+def test_call_tool_maps_registry_unavailable_to_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_execute(name_or_capability, arguments, context, confirmation_token=None, stable_only=False):
+        return ToolResult(
+            success=False,
+            error=ToolError(code="TOOL_REGISTRY_UNAVAILABLE", message="db down"),
+        )
+
+    monkeypatch.setattr(tools_api_module, "execute_tool", fake_execute)
+
+    with pytest.raises(AppException) as excinfo:
+        call_tool(ToolCallRequest(tool_name="kpi_query"))
+
+    assert excinfo.value.http_status == 503
+    assert excinfo.value.code == DB_CONNECTION_ERROR.code
+
+
+def test_call_tool_keeps_confirmation_token_and_stable_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[dict] = []
+
+    def fake_execute(name_or_capability, arguments, context, confirmation_token=None, stable_only=False):
+        captured.append({"token": confirmation_token, "stable_only": stable_only})
+        return ToolResult(success=True, data={})
+
+    monkeypatch.setattr(tools_api_module, "execute_tool", fake_execute)
+
+    call_tool(
+        ToolCallRequest(
+            tool_name="work_order_draft",
+            confirmation_token="tok-1",
+            stable_only=True,
+        )
+    )
+
+    assert captured == [{"token": "tok-1", "stable_only": True}]

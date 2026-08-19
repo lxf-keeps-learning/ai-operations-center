@@ -20,6 +20,23 @@ def _load_migration():
     return module
 
 
+def _load_hardening_migration():
+    migration_path = (
+        Path(__file__).parents[2]
+        / "alembic"
+        / "versions"
+        / "20260819_0005_harden_tool_registry_governance.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "tool_registry_hardening_migration",
+        migration_path,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_tool_registry_migration_creates_tables_constraints_and_indexes(monkeypatch) -> None:
     migration = _load_migration()
 
@@ -109,3 +126,64 @@ def test_tool_registry_migration_drops_indexes_before_tables(monkeypatch) -> Non
         ("drop_index", "ix_tool_definitions_tool_key"),
         ("drop_table", "tool_definitions"),
     ]
+
+
+def test_tool_registry_hardening_migration_adds_security_constraints(
+    monkeypatch,
+) -> None:
+    migration = _load_hardening_migration()
+    columns: list[tuple[str, str]] = []
+    indexes: list[tuple[str, str, tuple[str, ...], bool]] = []
+    checks: list[tuple[str, str, str]] = []
+    statements: list[str] = []
+    monkeypatch.setattr(
+        migration.op,
+        "add_column",
+        lambda table, column: columns.append((table, column.name)),
+    )
+    monkeypatch.setattr(
+        migration.op,
+        "create_index",
+        lambda name, table, fields, unique=False: indexes.append(
+            (name, table, tuple(fields), unique)
+        ),
+    )
+    monkeypatch.setattr(
+        migration.op,
+        "create_check_constraint",
+        lambda name, table, condition: checks.append((name, table, condition)),
+    )
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda statement: statements.append(str(statement)),
+    )
+
+    migration.upgrade()
+
+    assert migration.revision == "20260819_0005"
+    assert migration.down_revision == "20260819_0004"
+    assert ("tool_versions", "gray_percentage") in columns
+    assert ("tool_policies", "active_scope_key") in columns
+    assert ("tool_call_audits", "confirmation_token_hash") in columns
+    assert ("tool_call_audits", "policy_snapshot") in columns
+    assert (
+        "ux_tool_policies_active_scope",
+        "tool_policies",
+        ("tool_id", "active_scope_key"),
+        True,
+    ) in indexes
+    assert (
+        "ux_tool_call_audits_confirmation_token_hash",
+        "tool_call_audits",
+        ("confirmation_token_hash",),
+        True,
+    ) in indexes
+    assert checks == [
+        (
+            "ck_tool_policies_active_scope_key",
+            "tool_policies",
+            "enabled = 0 OR active_scope_key IS NOT NULL",
+        )
+    ]
+    assert any("UPDATE tool_policies" in statement for statement in statements)

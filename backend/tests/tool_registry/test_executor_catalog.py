@@ -9,7 +9,7 @@ class StubTool(BaseTool):
     name = "stub_tool"
     description = "Stub tool for executor catalog tests"
 
-    def _execute(self, tool_input: BaseToolInput) -> tuple[list, list[Evidence]]:
+    async def _execute(self, tool_input: BaseToolInput) -> tuple[list, list[Evidence]]:
         return [], []
 
 

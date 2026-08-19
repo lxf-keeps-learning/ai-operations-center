@@ -7,10 +7,16 @@ from datetime import UTC, datetime, timedelta
 import hashlib
 import hmac
 import json
+import secrets
 
 
 class ConfirmationInvalidError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class VerifiedConfirmation:
+    token_hash: str
 
 
 @dataclass(frozen=True)
@@ -39,6 +45,7 @@ class ConfirmationService:
             "argument_hash": argument_hash,
             "expires_at": expires_at,
             "issued_at": issued_at,
+            "nonce": secrets.token_urlsafe(16),
             "tool_key": tool_key,
             "trace_id": trace_id,
             "user_id": user_id,
@@ -57,7 +64,7 @@ class ConfirmationService:
         argument_hash: str,
         user_id: str,
         now: datetime,
-    ) -> None:
+    ) -> VerifiedConfirmation:
         payload_bytes, signature = _split_token(token)
         expected_signature = hmac.new(self.secret.encode(), payload_bytes, hashlib.sha256).digest()
         if not hmac.compare_digest(signature, expected_signature):
@@ -87,6 +94,12 @@ class ConfirmationService:
             raise ConfirmationInvalidError("invalid confirmation expiry")
         if int(now.astimezone(UTC).timestamp()) > expires_at:
             raise ConfirmationInvalidError("confirmation token expired")
+        nonce = payload.get("nonce")
+        if not isinstance(nonce, str) or not nonce:
+            raise ConfirmationInvalidError("invalid confirmation nonce")
+        return VerifiedConfirmation(
+            token_hash=hashlib.sha256(token.encode()).hexdigest(),
+        )
 
 
 def _split_token(token: str) -> tuple[bytes, bytes]:
@@ -103,6 +116,12 @@ def _urlsafe_b64encode(value: bytes) -> str:
 def _urlsafe_b64decode(value: str) -> bytes:
     padding = "=" * (-len(value) % 4)
     try:
-        return base64.urlsafe_b64decode(value + padding)
+        decoded = base64.urlsafe_b64decode(value + padding)
     except (ValueError, binascii.Error) as exc:
         raise ConfirmationInvalidError("invalid confirmation token") from exc
+    # A signed byte sequence must have exactly one accepted textual form. Python's
+    # decoder tolerates extra padding and ignored characters, so compare against the
+    # unpadded URL-safe encoding emitted by issue() before deriving the consumption key.
+    if _urlsafe_b64encode(decoded) != value:
+        raise ConfirmationInvalidError("non-canonical confirmation token")
+    return decoded

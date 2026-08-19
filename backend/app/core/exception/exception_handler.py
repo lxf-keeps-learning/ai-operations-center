@@ -64,7 +64,7 @@ async def app_exception_handler(request: Request, exc: AppException) -> JSONResp
     trace_id = _ensure_trace_id()
     return JSONResponse(
         status_code=exc.http_status,
-        headers={"X-Trace-Id": trace_id},
+        headers={"X-Trace-Id": trace_id, **exc.headers},
         content=ApiResponse(
             code=exc.code,
             message=exc.message,

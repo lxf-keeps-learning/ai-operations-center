@@ -107,3 +107,91 @@ class ToolUpstreamError(ToolException):
             detail=detail,
             retryable=retryable,
         )
+
+
+class CapabilityUnavailableError(ToolException):
+    """能力不可用：工具不存在、已关闭或没有已发布版本，不暴露内部实现名。"""
+
+    def __init__(self, capability: str | None = None):
+        super().__init__(
+            code="TOOL_CAPABILITY_UNAVAILABLE",
+            message=(
+                f"Capability unavailable: {capability}"
+                if capability
+                else "Capability unavailable"
+            ),
+            detail={"capability": capability} if capability else None,
+            retryable=False,
+        )
+
+
+class ToolForbiddenError(ToolException):
+    """权限拒绝：治理策略 deny 或非受信调用无匹配策略。"""
+
+    def __init__(
+        self,
+        message: str = "Tool access denied by governance policy",
+        detail: dict | None = None,
+        *,
+        resolution: dict | None = None,
+    ):
+        super().__init__(
+            code="TOOL_FORBIDDEN",
+            message=message,
+            detail=detail,
+            retryable=False,
+        )
+        # 仅供 Gateway 审计，不进入对调用方返回的 detail，避免泄露实现引用。
+        self.resolution = resolution or {}
+
+
+class ToolRateLimitedError(ToolException):
+    """触发限流，携带下一窗口可重试秒数。"""
+
+    def __init__(self, message: str = "Tool rate limit exceeded", retry_after_seconds: int | None = None):
+        super().__init__(
+            code="TOOL_RATE_LIMITED",
+            message=message,
+            detail=(
+                {"retry_after_seconds": retry_after_seconds}
+                if retry_after_seconds is not None
+                else None
+            ),
+            retryable=True,
+        )
+
+
+class ConfirmationRequiredError(ToolException):
+    """动作工具需要人工确认凭证后才能执行。"""
+
+    def __init__(self, message: str = "Action requires human confirmation", detail: dict | None = None):
+        super().__init__(
+            code="TOOL_CONFIRMATION_REQUIRED",
+            message=message,
+            detail=detail,
+            retryable=False,
+        )
+
+
+class RegistryConfigurationError(ToolException):
+    """Registry 配置错误：执行器未绑定、Schema 非法、发布不变量被破坏等。"""
+
+    def __init__(self, message: str, detail: dict | None = None):
+        super().__init__(
+            code="TOOL_REGISTRY_CONFIGURATION_ERROR",
+            message=message,
+            detail=detail,
+            retryable=False,
+        )
+
+
+class RegistryUnavailableError(ToolException):
+    """Registry 依赖（MySQL）不可用且缓存/快照无法继续服务。"""
+
+    def __init__(self, message: str = "Tool registry temporarily unavailable", detail: dict | None = None):
+        super().__init__(
+            code="TOOL_REGISTRY_UNAVAILABLE",
+            message=message,
+            detail=detail,
+            retryable=True,
+        )

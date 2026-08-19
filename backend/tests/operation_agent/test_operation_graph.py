@@ -417,3 +417,20 @@ def test_download_report_supports_chinese_filename(monkeypatch: pytest.MonkeyPat
     assert 'filename="operation-report.md"' in disposition
     assert "filename*=UTF-8''" in disposition
     assert "本质安全" not in disposition
+
+
+def test_query_node_capabilities_match_registry_mapping() -> None:
+    from app.operation_agent.nodes import query_operation_data_node as node_module
+    from app.tool_registry.compat import LEGACY_NAME_TO_CAPABILITY
+
+    node_capabilities = set(node_module._QUERY_CAPABILITIES.values()) | {
+        node_module._SUMMARY_CAPABILITY
+    }
+    assert node_capabilities == {
+        "query.kpi",
+        "query.alarm",
+        "query.risk",
+        "query.work_order",
+        "analysis.ioc_summary",
+    }
+    assert node_capabilities <= set(LEGACY_NAME_TO_CAPABILITY.values())

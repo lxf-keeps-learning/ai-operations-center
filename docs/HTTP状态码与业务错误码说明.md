@@ -523,3 +523,30 @@ traceId     → 串联前端错误、后端日志和数据库调用记录
 ```
 
 HTTP 状态码和业务码的分层设计，是 AI 主流程能够稳定联调、稳定排错、稳定迭代的基础。
+
+---
+
+# 14. Tool Registry 治理错误映射（增补）
+
+## 14.1 管理 API 专用业务码
+
+| code | HTTP | 场景 |
+|------|------|------|
+| `400050` | 400 | 工具发布或治理配置不满足约束（执行器未绑定、Schema 非法、灰度发布缺稳定版本、commit 动作关闭确认等） |
+| `404050` | 404 | 指定的工具、版本或治理策略不存在 |
+
+管理接口统一挂在 `/api/v1/tool-registry/*`，仅 `X-Roles` 含 `admin` 可访问；非管理员返回 `403001`。
+
+## 14.2 Tool 调用 API 治理错误映射
+
+`POST /api/v1/tools/call` 在 database 模式下的治理错误映射（保持标准 ApiResponse 信封）：
+
+| Tool 错误码 | HTTP | 业务码 | 说明 |
+|-------------|------|--------|------|
+| `TOOL_FORBIDDEN` | 403 | `403001` | 治理策略拒绝 |
+| `TOOL_RATE_LIMITED` | 429 | `429001` | 触发限流，message 携带重试秒数 |
+| `TOOL_CAPABILITY_UNAVAILABLE` | 404 | `404001` | 能力不可用，不暴露内部实现名 |
+| `TOOL_REGISTRY_UNAVAILABLE` | 503 | `503001` | Registry 依赖不可用（MySQL 故障且缓存/快照无法服务） |
+| `TOOL_CONFIRMATION_REQUIRED` | 200 | `0` | 动作确认挑战，随响应包返回 `confirmation_token`；重试必须复用挑战请求的 `X-Trace-Id` |
+
+调用方身份（user_id/tenant_id/role）只取自网关透传的请求头，请求体中的身份字段被忽略。
