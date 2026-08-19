@@ -27,6 +27,13 @@ def upgrade() -> None:
         sa.Column("enabled", sa.Boolean(), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
+        sa.CheckConstraint(
+            "tool_type IN ('query', 'analysis', 'action') AND ("
+            "(tool_type IN ('query', 'analysis') AND action_phase IS NULL) OR "
+            "(tool_type = 'action' AND action_phase IS NOT NULL AND action_phase IN ('prepare', 'commit'))"
+            ")",
+            name="ck_tool_definitions_type_phase",
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_tool_definitions_tool_key", "tool_definitions", ["tool_key"], unique=True)
@@ -47,6 +54,10 @@ def upgrade() -> None:
         sa.Column("published_by", sa.String(length=64), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
+        sa.CheckConstraint(
+            "status IN ('draft', 'published', 'retired')",
+            name="ck_tool_versions_status",
+        ),
         sa.ForeignKeyConstraint(["tool_id"], ["tool_definitions.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("tool_id", "version", name="uk_tool_version"),
@@ -120,8 +131,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_tool_call_audits_tool_created_at", table_name="tool_call_audits")
     op.drop_index("ix_tool_call_audits_policy_id", table_name="tool_call_audits")
+    op.drop_index("ix_tool_call_audits_tool_created_at", table_name="tool_call_audits")
     op.drop_index("ix_tool_call_audits_trace_id", table_name="tool_call_audits")
     op.drop_table("tool_call_audits")
 
@@ -133,7 +144,7 @@ def downgrade() -> None:
     op.drop_index("ix_tool_versions_tool_id_status", table_name="tool_versions")
     op.drop_table("tool_versions")
 
+    op.drop_index("ix_tool_definitions_enabled", table_name="tool_definitions")
     op.drop_index("ix_tool_definitions_capability", table_name="tool_definitions")
     op.drop_index("ix_tool_definitions_tool_key", table_name="tool_definitions")
-    op.drop_index("ix_tool_definitions_enabled", table_name="tool_definitions")
     op.drop_table("tool_definitions")

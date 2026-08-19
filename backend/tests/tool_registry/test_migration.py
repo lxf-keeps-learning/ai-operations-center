@@ -48,8 +48,11 @@ def test_tool_registry_migration_creates_tables_constraints_and_indexes(monkeypa
         isinstance(argument, UniqueConstraint) and argument.name == "uk_tool_version"
         for argument in tool_versions_args
     )
+    assert any(getattr(argument, "name", None) == "ck_tool_versions_status" for argument in tool_versions_args)
     assert not any(getattr(argument, "name", None) == "gray_percentage" for argument in tool_versions_args)
 
+    tool_definitions_args = next(args for args in created_tables if args[0] == "tool_definitions")
+    assert any(getattr(argument, "name", None) == "ck_tool_definitions_type_phase" for argument in tool_definitions_args)
     tool_policies_args = next(args for args in created_tables if args[0] == "tool_policies")
     tool_call_audits_args = next(args for args in created_tables if args[0] == "tool_call_audits")
     assert any(getattr(argument, "name", None) == "gray_percentage" for argument in tool_policies_args)
@@ -70,22 +73,33 @@ def test_tool_registry_migration_creates_tables_constraints_and_indexes(monkeypa
 def test_tool_registry_migration_drops_indexes_before_tables(monkeypatch) -> None:
     migration = _load_migration()
 
-    dropped_indexes: list[tuple[tuple, dict]] = []
-    dropped_tables: list[str] = []
+    operations: list[tuple[str, str]] = []
     monkeypatch.setattr(
         migration.op,
         "drop_index",
-        lambda *args, **kwargs: dropped_indexes.append((args, kwargs)),
+        lambda *args, **kwargs: operations.append(("drop_index", args[0])),
     )
-    monkeypatch.setattr(migration.op, "drop_table", lambda table_name: dropped_tables.append(table_name))
+    monkeypatch.setattr(
+        migration.op,
+        "drop_table",
+        lambda table_name: operations.append(("drop_table", table_name)),
+    )
 
     migration.downgrade()
 
-    assert dropped_tables == [
-        "tool_call_audits",
-        "tool_policies",
-        "tool_versions",
-        "tool_definitions",
+    assert operations == [
+        ("drop_index", "ix_tool_call_audits_policy_id"),
+        ("drop_index", "ix_tool_call_audits_tool_created_at"),
+        ("drop_index", "ix_tool_call_audits_trace_id"),
+        ("drop_table", "tool_call_audits"),
+        ("drop_index", "ix_tool_policies_enabled"),
+        ("drop_index", "ix_tool_policies_scope"),
+        ("drop_table", "tool_policies"),
+        ("drop_index", "ix_tool_versions_tool_id_status_stable"),
+        ("drop_index", "ix_tool_versions_tool_id_status"),
+        ("drop_table", "tool_versions"),
+        ("drop_index", "ix_tool_definitions_enabled"),
+        ("drop_index", "ix_tool_definitions_capability"),
+        ("drop_index", "ix_tool_definitions_tool_key"),
+        ("drop_table", "tool_definitions"),
     ]
-    assert dropped_indexes[0][0][0] == "ix_tool_call_audits_tool_created_at"
-    assert dropped_indexes[-1][0][0] == "ix_tool_definitions_enabled"
