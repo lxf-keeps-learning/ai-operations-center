@@ -10,7 +10,7 @@
 #   4. 将原始数据和衍生指标写回 state，供下游 LLM 节点使用
 #
 # 设计要点：
-#   - Node 不直接 import 任何具体 Tool 类，只依赖 get_tool("kpi_query") 按名称获取
+#   - Node 不直接 import 任何具体 Tool 类，只按 capability 经 execute_tool 调用
 #   - 切换 Mock ↔ 真实 IOC 只需改 register.py 中的 Client，本文件不动
 #   - _run_tool 内部用 ToolResult 协议，不处理裸异常（BaseTool.run 已确保）
 
