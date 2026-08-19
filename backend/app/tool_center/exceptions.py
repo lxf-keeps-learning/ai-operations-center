@@ -103,13 +103,21 @@ class CapabilityUnavailableError(ToolException):
 class ToolForbiddenError(ToolException):
     """权限拒绝：治理策略 deny 或非受信调用无匹配策略。"""
 
-    def __init__(self, message: str = "Tool access denied by governance policy", detail: dict | None = None):
+    def __init__(
+        self,
+        message: str = "Tool access denied by governance policy",
+        detail: dict | None = None,
+        *,
+        resolution: dict | None = None,
+    ):
         super().__init__(
             code="TOOL_FORBIDDEN",
             message=message,
             detail=detail,
             retryable=False,
         )
+        # 仅供 Gateway 审计，不进入对调用方返回的 detail，避免泄露实现引用。
+        self.resolution = resolution or {}
 
 
 class ToolRateLimitedError(ToolException):

@@ -42,6 +42,7 @@ GRAY_VERSION = ToolVersionRecord(
     output_schema={"type": "object"},
     status=VersionStatus.PUBLISHED,
     is_stable=False,
+    gray_percentage=100,
 )
 
 POLICIES = (

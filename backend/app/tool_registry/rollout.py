@@ -44,10 +44,18 @@ def choose_version(
 
     bucket = gray_bucket(tool.tool_key, context.tenant_id)
     for candidate in gray_candidates:
-        candidate_policy = resolve_policy(list(policies), version_id=candidate.id, context=context)
+        try:
+            candidate_policy = resolve_policy(
+                list(policies),
+                version_id=candidate.id,
+                context=context,
+            )
+        except ValueError:
+            # 候选没有自己的可继承权限时只跳过候选；稳定版稍后独立授权。
+            continue
         if candidate_policy.decision.value == "deny":
             continue
-        if bucket < candidate_policy.gray_percentage:
+        if bucket < candidate.gray_percentage:
             return _selection(candidate, gray_bucket_value=bucket, selected_stable=False)
 
     return _selection(stable, gray_bucket_value=bucket, selected_stable=True)

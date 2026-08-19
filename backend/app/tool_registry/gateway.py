@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 import time
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
+
 from app.core.logging.logger import get_logger
 from app.core.trace.trace_context import get_trace_id
 from app.tool_center.contracts import BaseToolInput, ToolContext, ToolError, ToolResult
@@ -62,13 +64,14 @@ class ToolGateway:
         confirmation_token: str | None = None,
         stable_only: bool = False,
     ) -> ToolResult:
-        trace_id = self._current_trace_id()
+        trace_id = self._current_trace_id(context)
         argument_hash = hash_arguments(arguments)
         summary = build_argument_summary(arguments)
 
         try:
             resolved = self._registry.resolve(capability, context, stable_only=stable_only)
         except ToolForbiddenError as exc:
+            resolution = getattr(exc, "resolution", None)
             self._persist_audit(
                 self._draft(
                     trace_id=trace_id,
@@ -79,8 +82,9 @@ class ToolGateway:
                     summary=summary,
                     error_code=exc.code,
                     policy_id=_detail_value(exc, "policy_id"),
+                    resolution=resolution,
                 ),
-                tool_key=None,
+                tool_key=_mapping_value(resolution, "tool_key"),
             )
             return self._failure_result(exc.code, exc.message, trace_id=trace_id, detail=exc.detail)
         except CapabilityUnavailableError as exc:
@@ -162,8 +166,9 @@ class ToolGateway:
                 resolved=resolved,
             )
 
+        confirmation_token_hash = None
         if resolved.action_phase is ActionPhase.COMMIT or resolved.requires_confirmation:
-            challenge = self._verify_or_challenge(
+            challenge, confirmation_token_hash = self._verify_or_challenge(
                 resolved,
                 arguments,
                 argument_hash,
@@ -199,21 +204,46 @@ class ToolGateway:
                 resolved=resolved,
             )
 
-        audit_id = self._persist_audit(
-            self._draft(
-                trace_id=trace_id,
-                context=context,
-                resolved=resolved,
-                decision="allowed",
-                status="pending",
-                argument_hash=argument_hash,
-                summary=summary,
-            ),
-            tool_key=resolved.tool_key,
+        audit = self._draft(
+            trace_id=trace_id,
+            context=context,
+            resolved=resolved,
+            decision="allowed",
+            status="pending",
+            argument_hash=argument_hash,
+            summary=summary,
+            confirmation_token_hash=confirmation_token_hash,
         )
+        if confirmation_token_hash is not None:
+            audit_id, confirmation_error = self._persist_confirmed_audit(
+                audit,
+                tool_key=resolved.tool_key,
+            )
+            if confirmation_error == "replayed":
+                return self._challenge_result(
+                    resolved,
+                    argument_hash,
+                    summary,
+                    context,
+                    trace_id,
+                    context.user_id or "",
+                )
+            if confirmation_error is not None:
+                return self._failure_result(
+                    "TOOL_REGISTRY_CONFIGURATION_ERROR",
+                    "confirmation consumption could not be persisted",
+                    trace_id=trace_id,
+                    resolved=resolved,
+                )
+        else:
+            audit_id = self._persist_audit(
+                audit,
+                tool_key=resolved.tool_key,
+            )
 
         started = time.perf_counter()
-        result = tool.run(BaseToolInput(context=context, filters=arguments))
+        execution_context = context.model_copy(update={"request_id": trace_id})
+        result = tool.run(BaseToolInput(context=execution_context, filters=arguments))
         duration_ms = max(1, int((time.perf_counter() - started) * 1000))
 
         if resolved.action_phase is ActionPhase.PREPARE and not self._has_confirmation_marker(result):
@@ -253,7 +283,7 @@ class ToolGateway:
         context: ToolContext,
         confirmation_token: str | None,
         trace_id: str,
-    ) -> ToolResult | None:
+    ) -> tuple[ToolResult | None, str | None]:
         if self._confirmation_service is None:
             error_code = "TOOL_REGISTRY_CONFIGURATION_ERROR"
             self._persist_audit(
@@ -269,20 +299,26 @@ class ToolGateway:
                 ),
                 tool_key=resolved.tool_key,
             )
-            return self._failure_result(
-                error_code,
-                "confirmation service is not configured",
-                trace_id=trace_id,
-                resolved=resolved,
+            return (
+                self._failure_result(
+                    error_code,
+                    "confirmation service is not configured",
+                    trace_id=trace_id,
+                    resolved=resolved,
+                ),
+                None,
             )
 
         user_id = context.user_id or ""
         if confirmation_token is None:
-            return self._challenge_result(
-                resolved, argument_hash, summary, context, trace_id, user_id
+            return (
+                self._challenge_result(
+                    resolved, argument_hash, summary, context, trace_id, user_id
+                ),
+                None,
             )
         try:
-            self._confirmation_service.verify(
+            verified = self._confirmation_service.verify(
                 confirmation_token,
                 trace_id,
                 resolved.tool_key,
@@ -292,10 +328,13 @@ class ToolGateway:
                 self._clock(),
             )
         except ConfirmationInvalidError:
-            return self._challenge_result(
-                resolved, argument_hash, summary, context, trace_id, user_id
+            return (
+                self._challenge_result(
+                    resolved, argument_hash, summary, context, trace_id, user_id
+                ),
+                None,
             )
-        return None
+        return None, verified.token_hash
 
     def _challenge_result(
         self,
@@ -335,10 +374,10 @@ class ToolGateway:
             extra_metadata={"confirmation_token": token},
         )
 
-    def _current_trace_id(self) -> str:
+    def _current_trace_id(self, context: ToolContext) -> str:
         trace_id = get_trace_id()
         if not trace_id:
-            trace_id = new_trace_id()
+            trace_id = context.request_id or new_trace_id()
         return trace_id
 
     def _draft(
@@ -353,20 +392,53 @@ class ToolGateway:
         resolved: ResolvedTool | None = None,
         error_code: str | None = None,
         policy_id: int | None = None,
+        resolution: dict[str, Any] | None = None,
+        confirmation_token_hash: str | None = None,
     ) -> ToolCallAudit:
+        resolved_metadata = (
+            {
+                "tool_id": resolved.tool_id,
+                "tool_key": resolved.tool_key,
+                "capability": resolved.capability,
+                "version_id": resolved.version_id,
+                "version": resolved.version,
+                "implementation_ref": resolved.implementation_ref,
+                "policy_id": resolved.policy_id,
+                "gray_bucket": resolved.gray_bucket,
+                "selected_stable": resolved.selected_stable,
+                "policy_snapshot": {
+                    "policy_id": resolved.policy_id,
+                    "decision": "allow",
+                    "rate_limit_per_minute": resolved.rate_limit_per_minute,
+                    "requires_confirmation": resolved.requires_confirmation,
+                    "reason": "resolved_policy" if resolved.policy_id else "internal_default",
+                },
+            }
+            if resolved is not None
+            else (resolution or {})
+        )
         return ToolCallAudit(
             trace_id=trace_id,
-            tool_id=resolved.tool_id if resolved else None,
-            version_id=resolved.version_id if resolved else None,
-            implementation_ref=resolved.implementation_ref if resolved else None,
+            tool_id=resolved_metadata.get("tool_id"),
+            version_id=resolved_metadata.get("version_id"),
+            tool_key_snapshot=resolved_metadata.get("tool_key"),
+            capability_snapshot=resolved_metadata.get("capability"),
+            version_snapshot=resolved_metadata.get("version"),
+            implementation_ref=resolved_metadata.get("implementation_ref"),
             tenant_id=context.tenant_id,
             user_id=context.user_id,
             role=context.role,
             caller_type=context.caller_type,
-            policy_id=policy_id if policy_id is not None else (resolved.policy_id if resolved else None),
+            policy_id=(
+                policy_id
+                if policy_id is not None
+                else resolved_metadata.get("policy_id")
+            ),
+            policy_snapshot=resolved_metadata.get("policy_snapshot"),
+            confirmation_token_hash=confirmation_token_hash,
             decision=decision,
-            gray_bucket=resolved.gray_bucket if resolved else None,
-            selected_stable=resolved.selected_stable if resolved else None,
+            gray_bucket=resolved_metadata.get("gray_bucket"),
+            selected_stable=resolved_metadata.get("selected_stable"),
             status=status,
             duration_ms=None,
             error_code=error_code,
@@ -390,6 +462,45 @@ class ToolGateway:
                 audit.decision,
             )
             return None
+        finally:
+            self._close(repository)
+
+    def _persist_confirmed_audit(
+        self,
+        audit: ToolCallAudit,
+        *,
+        tool_key: str,
+    ) -> tuple[int | None, str | None]:
+        """原子消费确认 token；唯一索引使多个进程只能有一个提交者成功。"""
+        repository = None
+        try:
+            repository = self._repository_factory()
+            created = repository.append_audit(audit)
+            repository.db.commit()
+            return created.id, None
+        except IntegrityError as exc:
+            self._rollback(repository)
+            if "confirmation_token_hash" in str(exc):
+                logger.warning(
+                    "TOOL_CONFIRMATION_REPLAYED trace_id=%s tool_key=%s",
+                    audit.trace_id,
+                    tool_key,
+                )
+                return None, "replayed"
+            logger.error(
+                "TOOL_CONFIRMATION_CONSUME_FAILED trace_id=%s tool_key=%s",
+                audit.trace_id,
+                tool_key,
+            )
+            return None, "persistence_failed"
+        except Exception:
+            self._rollback(repository)
+            logger.error(
+                "TOOL_CONFIRMATION_CONSUME_FAILED trace_id=%s tool_key=%s",
+                audit.trace_id,
+                tool_key,
+            )
+            return None, "persistence_failed"
         finally:
             self._close(repository)
 
@@ -498,4 +609,10 @@ def _detail_value(exc: Exception, key: str) -> Any | None:
     detail = getattr(exc, "detail", None)
     if isinstance(detail, dict):
         return detail.get(key)
+    return None
+
+
+def _mapping_value(value: object, key: str) -> Any | None:
+    if isinstance(value, dict):
+        return value.get(key)
     return None

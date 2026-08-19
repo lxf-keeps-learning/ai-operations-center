@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from jsonschema import SchemaError
 from jsonschema.validators import validator_for
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.tool_center.exceptions import RegistryConfigurationError, ToolNotFoundError
@@ -60,6 +61,10 @@ class ToolRegistryService:
     def create_tool(self, request: ToolCreateRequest, operator_id: str) -> ToolDefinition:
         if self.repository.get_definition(request.tool_key) is not None:
             raise RegistryConfigurationError(f"tool_key already exists: {request.tool_key}")
+        if self.repository.get_definition_by_capability(request.capability) is not None:
+            raise RegistryConfigurationError(
+                f"capability already exists: {request.capability}"
+            )
         self._validate_type_phase(request.tool_type, request.action_phase)
         definition = ToolDefinition(
             tool_key=request.tool_key,
@@ -69,10 +74,15 @@ class ToolRegistryService:
             tool_type=request.tool_type,
             action_phase=request.action_phase,
             enabled=request.enabled,
+            created_by=operator_id,
+            updated_by=operator_id,
         )
         try:
             self.repository.save_definition(definition)
             self._commit()
+        except IntegrityError as exc:
+            self.db.rollback()
+            raise self._integrity_error(exc, entity="tool") from exc
         except Exception:
             self.db.rollback()
             raise
@@ -91,6 +101,7 @@ class ToolRegistryService:
             definition.description = request.description
         if request.enabled is not None:
             definition.enabled = request.enabled
+        definition.updated_by = operator_id
         try:
             self.db.flush()
             self._commit()
@@ -120,10 +131,16 @@ class ToolRegistryService:
             output_schema=request.output_schema,
             status="draft",
             is_stable=False,
+            gray_percentage=0,
+            created_by=operator_id,
+            updated_by=operator_id,
         )
         try:
             self.repository.save_version(version)
             self._commit()
+        except IntegrityError as exc:
+            self.db.rollback()
+            raise self._integrity_error(exc, entity="version") from exc
         except Exception:
             self.db.rollback()
             raise
@@ -147,22 +164,33 @@ class ToolRegistryService:
         self._validate_publish(definition, target, release_type, gray_percentage)
 
         try:
+            changed_at = now_local()
             if release_type == "stable":
                 for other in self.repository.list_versions(definition.id):
                     if other.id != target.id and other.status == "published" and other.is_stable:
                         other.status = "retired"
                         other.is_stable = False
+                        other.retired_at = changed_at
+                        other.retired_by = operator_id
+                        other.updated_by = operator_id
                 target.status = "published"
                 target.is_stable = True
+                target.gray_percentage = 0
             else:
                 for other in self.repository.list_versions(definition.id):
                     if other.id != target.id and other.status == "published" and not other.is_stable:
                         other.status = "retired"
+                        other.retired_at = changed_at
+                        other.retired_by = operator_id
+                        other.updated_by = operator_id
                 target.status = "published"
                 target.is_stable = False
-                self._upsert_gray_policy(definition, target, gray_percentage, operator_id)
+                target.gray_percentage = gray_percentage
             target.published_at = target.published_at or now_local()
             target.published_by = operator_id
+            target.retired_at = None
+            target.retired_by = None
+            target.updated_by = operator_id
             self._commit()
         except Exception:
             self.db.rollback()
@@ -181,6 +209,9 @@ class ToolRegistryService:
         try:
             target.status = "retired"
             target.is_stable = False
+            target.retired_at = now_local()
+            target.retired_by = operator_id
+            target.updated_by = operator_id
             self._commit()
         except Exception:
             self.db.rollback()
@@ -193,7 +224,9 @@ class ToolRegistryService:
         policies: list[PolicySpec],
         operator_id: str,
     ) -> list[ToolPolicy]:
-        definition = self._get_definition(tool_key)
+        definition = self.repository.get_definition(tool_key, for_update=True)
+        if definition is None:
+            raise ToolNotFoundError(tool_key)
         if definition.action_phase == "commit":
             for spec in policies:
                 if not spec.requires_confirmation:
@@ -223,7 +256,11 @@ class ToolRegistryService:
         try:
             existing = self.repository.list_policies(definition.id)
             for policy in existing:
-                self.db.delete(policy)
+                if policy.enabled:
+                    policy.enabled = False
+                    policy.updated_by = operator_id
+            # 先释放 active_scope_key 唯一键，再插入新的启用策略。
+            self.db.flush()
             created = []
             for spec, version_id in resolved_specs:
                 policy = ToolPolicy(
@@ -241,6 +278,9 @@ class ToolRegistryService:
                 self.repository.save_policy(policy)
                 created.append(policy)
             self._commit()
+        except IntegrityError as exc:
+            self.db.rollback()
+            raise self._integrity_error(exc, entity="policy") from exc
         except Exception:
             self.db.rollback()
             raise
@@ -286,38 +326,6 @@ class ToolRegistryService:
                     "a stable version must exist before publishing a gray version"
                 )
 
-    def _upsert_gray_policy(
-        self,
-        definition: ToolDefinition,
-        target: ToolVersion,
-        gray_percentage: int,
-        operator_id: str,
-    ) -> None:
-        policy = self.repository.get_policy(
-            definition.id,
-            version_id=target.id,
-            tenant_id=None,
-            role=None,
-        )
-        if policy is None:
-            policy = ToolPolicy(
-                tool_id=definition.id,
-                version_id=target.id,
-                tenant_id=None,
-                role=None,
-                decision="allow",
-                rate_limit_per_minute=60,
-                gray_percentage=gray_percentage,
-                requires_confirmation=definition.action_phase == "commit",
-                enabled=True,
-                updated_by=operator_id,
-            )
-            self.repository.save_policy(policy)
-        else:
-            policy.gray_percentage = gray_percentage
-            policy.enabled = True
-            policy.updated_by = operator_id
-
     def _commit(self) -> None:
         self.db.commit()
         self._on_config_changed()
@@ -340,3 +348,16 @@ class ToolRegistryService:
             validator_for(schema).check_schema(schema)
         except (SchemaError, TypeError, ValueError) as exc:
             raise RegistryConfigurationError(f"invalid {label} JSON Schema: {exc}") from exc
+
+    @staticmethod
+    def _integrity_error(exc: IntegrityError, *, entity: str) -> RegistryConfigurationError:
+        message = str(exc).lower()
+        if "capability" in message:
+            return RegistryConfigurationError("capability already exists")
+        if "tool_key" in message:
+            return RegistryConfigurationError("tool_key already exists")
+        if entity == "version" or "uk_tool_version" in message or "tool_versions" in message:
+            return RegistryConfigurationError("version already exists")
+        if "active_scope" in message or entity == "policy":
+            return RegistryConfigurationError("duplicate enabled policy scope")
+        return RegistryConfigurationError("registry uniqueness constraint violated")

@@ -90,12 +90,21 @@ class DatabaseToolRegistry:
             context,
             stable_only=stable_only,
         )
-        effective_policy = self._resolve_final_policy(
-            definition,
-            policies,
-            selection.version_id,
-            context,
-        )
+        try:
+            effective_policy = self._resolve_final_policy(
+                definition,
+                policies,
+                selection.version_id,
+                context,
+            )
+        except ToolForbiddenError as exc:
+            exc.resolution = self._resolution_metadata(
+                definition,
+                selection,
+                policy=None,
+                reason="no_matching_policy",
+            )
+            raise
         if effective_policy.decision is GovernanceDecision.DENY:
             raise ToolForbiddenError(
                 f"tool access denied by governance policy for capability {definition.capability}",
@@ -103,6 +112,12 @@ class DatabaseToolRegistry:
                     "policy_id": effective_policy.policy_id,
                     "capability": definition.capability,
                 },
+                resolution=self._resolution_metadata(
+                    definition,
+                    selection,
+                    policy=effective_policy,
+                    reason="policy_deny",
+                ),
             )
         return ResolvedTool(
             tool_id=definition.id,
@@ -254,6 +269,37 @@ class DatabaseToolRegistry:
                 gray_percentage=0,
                 requires_confirmation=False,
             )
+
+    @staticmethod
+    def _resolution_metadata(
+        definition: ToolDefinitionRecord,
+        selection: VersionSelection,
+        *,
+        policy: EffectivePolicy | None,
+        reason: str,
+    ) -> dict[str, object]:
+        return {
+            "tool_id": definition.id,
+            "tool_key": definition.tool_key,
+            "capability": definition.capability,
+            "version_id": selection.version_id,
+            "version": selection.version,
+            "implementation_ref": selection.implementation_ref,
+            "policy_id": policy.policy_id if policy else None,
+            "gray_bucket": selection.gray_bucket,
+            "selected_stable": selection.selected_stable,
+            "policy_snapshot": {
+                "policy_id": policy.policy_id if policy else None,
+                "decision": policy.decision.value if policy else "deny",
+                "rate_limit_per_minute": (
+                    policy.rate_limit_per_minute if policy else None
+                ),
+                "requires_confirmation": (
+                    policy.requires_confirmation if policy else None
+                ),
+                "reason": reason,
+            },
+        }
 
 
 _active_registry: DatabaseToolRegistry | None = None

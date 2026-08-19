@@ -88,7 +88,7 @@ def _query_gateway(policies=()):
     return build_gateway(
         (KPI,),
         (KPI_VERSION,),
-        (KPI_POLICY, *policies),
+        policies or (KPI_POLICY,),
         executors={"builtin.kpi_query": StubQueryTool()},
     )
 
@@ -130,6 +130,40 @@ def test_gateway_executes_selected_executor_and_enriches_metadata() -> None:
     assert result.metadata["gray_bucket"] is None
 
 
+def test_gateway_uses_context_request_id_as_canonical_trace_without_global_context() -> None:
+    gateway, _loader, session_factory = _query_gateway()
+    context = INTERNAL.model_copy(update={"request_id": "trace-mcp-no-global"})
+
+    result = gateway.execute("query.kpi", {}, context)
+
+    assert result.trace_id == "trace-mcp-no-global"
+    with session_factory() as session:
+        from sqlalchemy import select
+
+        from app.tool_registry.models import ToolCallAudit
+
+        audit = session.scalar(select(ToolCallAudit))
+        assert audit is not None
+        assert audit.trace_id == result.trace_id
+
+
+def test_gateway_propagates_generated_trace_to_base_tool_without_global_or_request_id() -> None:
+    clear_trace_id()
+    gateway, _loader, session_factory = _query_gateway()
+
+    result = gateway.execute("query.kpi", {}, INTERNAL)
+
+    assert result.trace_id
+    with session_factory() as session:
+        from sqlalchemy import select
+
+        from app.tool_registry.models import ToolCallAudit
+
+        audit = session.scalar(select(ToolCallAudit))
+        assert audit is not None
+        assert audit.trace_id == result.trace_id
+
+
 def test_commit_without_confirmation_returns_challenge() -> None:
     gateway, _loader, _sf, tool = _commit_gateway()
 
@@ -160,6 +194,52 @@ def test_commit_with_verified_confirmation_executes() -> None:
 
     assert second.success is True
     assert second.metadata["tool_key"] == "work_order_commit"
+    assert tool.calls == 1
+
+
+def test_commit_confirmation_is_consumed_once_across_gateway_instances() -> None:
+    tool = StubCommitTool()
+    gateway_one, _loader, session_factory = build_gateway(
+        (COMMIT_TOOL,),
+        (COMMIT_VERSION,),
+        (COMMIT_POLICY,),
+        executors={"builtin.work_order_commit": tool},
+    )
+    gateway_two, _loader_two, _same_factory = build_gateway(
+        (COMMIT_TOOL,),
+        (COMMIT_VERSION,),
+        (COMMIT_POLICY,),
+        executors={"builtin.work_order_commit": tool},
+        session_factory=session_factory,
+        seed_registry_rows=False,
+    )
+    set_trace_id("trace-commit-single-use")
+    try:
+        challenge = gateway_one.execute(
+            "action.work_order.commit",
+            {"draft_id": "d1"},
+            INTERNAL,
+        )
+        token = challenge.metadata["confirmation_token"]
+        committed = gateway_one.execute(
+            "action.work_order.commit",
+            {"draft_id": "d1"},
+            INTERNAL,
+            confirmation_token=token,
+        )
+        replayed = gateway_two.execute(
+            "action.work_order.commit",
+            {"draft_id": "d1"},
+            INTERNAL,
+            confirmation_token=token,
+        )
+    finally:
+        clear_trace_id()
+
+    assert committed.success is True
+    assert replayed.success is False
+    assert replayed.error is not None
+    assert replayed.error.code == "TOOL_CONFIRMATION_REQUIRED"
     assert tool.calls == 1
 
 
@@ -289,6 +369,7 @@ def test_stable_only_forwards_to_registry() -> None:
         version="1.1.0",
         implementation_ref="builtin.kpi_query.v110",
         is_stable=False,
+        gray_percentage=100,
     )
     gray_policy = make_policy(2, 1, version_id=12, gray_percentage=100)
     gateway, _loader, _sf = build_gateway(

@@ -7,6 +7,7 @@ from app.core.exception.base_exception import AppException
 from app.core.exception.error_code import DB_CONNECTION_ERROR, FORBIDDEN, NOT_FOUND, RATE_LIMIT
 from app.main import app
 from app.tool_center.contracts import ToolContext, ToolError, ToolResult
+from app.tool_registry.contracts import ToolDescriptor as RegistryToolDescriptor, ToolType
 from app.tools import api as tools_api_module
 from app.tools.api import ToolCallRequest, call_tool
 
@@ -29,6 +30,46 @@ async def test_tools_list_endpoint_returns_registered_tools() -> None:
         "work_order_draft",
         "work_order_query",
     }.issubset(names)
+
+
+@pytest.mark.anyio
+async def test_tools_list_database_mode_uses_governed_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(tools_api_module.settings, "tool_registry_mode", "database")
+    monkeypatch.setattr(
+        tools_api_module,
+        "discover_tools",
+        lambda context: [
+            RegistryToolDescriptor(
+                tool_id=7,
+                tool_key="visible_tool",
+                capability="query.visible",
+                name="visible_tool",
+                description="visible",
+                tool_type=ToolType.QUERY,
+                action_phase=None,
+                version_id=71,
+                version="2.0.0",
+                input_schema={"type": "object"},
+                output_schema={"type": "object"},
+                rate_limit_per_minute=60,
+                selected_stable=True,
+            )
+        ],
+        raising=False,
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(
+            "/api/v1/tools",
+            headers={"X-Org-Id": "tenant-a", "X-Roles": "operator"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == [
+        {"name": "visible_tool", "description": "visible"}
+    ]
 
 
 @pytest.mark.anyio
@@ -215,6 +256,34 @@ def test_call_tool_maps_rate_limited_to_429(monkeypatch: pytest.MonkeyPatch) -> 
     assert excinfo.value.http_status == 429
     assert excinfo.value.code == RATE_LIMIT.code
     assert "12" in excinfo.value.message
+    assert excinfo.value.data == {"retry_after_seconds": 12}
+
+
+@pytest.mark.anyio
+async def test_tools_call_rate_limit_sets_retry_after_header_and_structured_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_execute(name_or_capability, arguments, context, confirmation_token=None, stable_only=False):
+        return ToolResult(
+            success=False,
+            error=ToolError(
+                code="TOOL_RATE_LIMITED",
+                message="too many",
+                detail={"retry_after_seconds": 12},
+            ),
+        )
+
+    monkeypatch.setattr(tools_api_module, "execute_tool", fake_execute)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/tools/call",
+            json={"tool_name": "kpi_query"},
+        )
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "12"
+    assert response.json()["data"] == {"retry_after_seconds": 12}
 
 
 def test_call_tool_maps_capability_unavailable_to_404(

@@ -233,8 +233,39 @@ def test_tool_policy_indexes_cover_specificity_lookup() -> None:
     assert indexes["ix_tool_policies_enabled"] == ("enabled",)
 
 
-def test_rollout_percentage_is_stored_only_on_policies() -> None:
-    assert "gray_percentage" not in ToolVersion.__table__.c.keys()
+def test_database_rejects_duplicate_enabled_policy_scope(session: Session) -> None:
+    tool = ToolDefinition(
+        tool_key="scope_tool",
+        capability="query.scope",
+        name="scope",
+        description="scope",
+        tool_type="query",
+        action_phase=None,
+        enabled=True,
+    )
+    session.add(tool)
+    session.flush()
+    for decision in ("allow", "deny"):
+        session.add(
+            ToolPolicy(
+                tool_id=tool.id,
+                version_id=None,
+                tenant_id="tenant-a",
+                role="operator",
+                decision=decision,
+                rate_limit_per_minute=60,
+                gray_percentage=0,
+                requires_confirmation=False,
+                enabled=True,
+            )
+        )
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_rollout_percentage_is_stored_on_versions_independently_from_policies() -> None:
+    assert "gray_percentage" in ToolVersion.__table__.c.keys()
     assert "gray_percentage" in ToolPolicy.__table__.c.keys()
     assert any(constraint.name == "ck_tool_versions_status" for constraint in ToolVersion.__table__.constraints)
     assert any(constraint.name == "ck_tool_definitions_type_phase" for constraint in ToolDefinition.__table__.constraints)

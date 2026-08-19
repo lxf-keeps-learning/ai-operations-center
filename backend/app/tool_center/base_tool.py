@@ -47,7 +47,7 @@ class BaseTool(ABC):
         # 复用全局 trace_id（由 trace_middleware 在 HTTP 请求入口设置）；
         # 非 HTTP 上下文（如 LangGraph 内部调用）可能没有 trace_id，
         # 此时作为 fallback 生成一个，保持单向依赖 app/core。
-        trace_id = get_trace_id()
+        trace_id = get_trace_id() or safe_input.context.request_id
         if not trace_id:
             trace_id = _gen_trace_id()
             logger.debug("No global trace_id, generated fallback: %s", trace_id)

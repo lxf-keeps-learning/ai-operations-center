@@ -86,6 +86,7 @@ capability
 - `tool_type`：`query | analysis | action`
 - 可选 `action_phase`：动作工具为 `prepare | commit`，其他类型为空
 - `enabled`
+- `created_by`、`updated_by`
 - `created_at`、`updated_at`
 
 `tool_key` 用于治理和管理，`capability` 用于运行时发现。同一能力本期只对应一个启用的工具定义，避免出现未定义的跨工具选择规则。
@@ -101,7 +102,10 @@ capability
 - `input_schema`、`output_schema`：JSON Schema
 - `status`：`draft | published | retired`
 - `is_stable`
+- `gray_percentage`：`0-100`，仅表示该已发布灰度版本的流量比例，不授予权限
 - `published_at`、`published_by`
+- `retired_at`、`retired_by`
+- `created_by`、`updated_by`
 - `created_at`、`updated_at`
 
 约束与不变量：
@@ -121,11 +125,12 @@ capability
 - 可选 `version_id`
 - 可选 `tenant_id`
 - 可选 `role`
-- `permission`：`allow | deny`
+- `decision`：`allow | deny`
 - `rate_limit_per_minute`
-- `gray_percentage`：`0-100`
+- `gray_percentage`：兼容旧管理响应保留，运行时灰度比例以版本字段为唯一来源
 - `require_confirmation`
 - `enabled`
+- `active_scope_key`：启用 scope 的标准化哈希；下线策略为空
 - `created_at`、`updated_at`、`updated_by`
 
 匹配优先级从高到低为：
@@ -135,7 +140,7 @@ capability
 3. 工具级的具体租户和角色。
 4. 工具级默认策略。
 
-同一优先级只允许一条启用策略。没有匹配策略时，仅允许 `caller_type=internal` 的受信调用。兼容适配器产生的现有内部调用上下文标记为 `internal`。
+同一 `(tool_id, version_id, tenant_id, role)` scope 只允许一条启用策略。管理端替换策略时先锁定工具定义行，再把旧策略软下线并插入新策略；旧行不可变地保留给历史审计。MySQL 对含 `NULL` 的普通唯一键不会互斥，因此使用非空 `active_scope_key` 与 `(tool_id, active_scope_key)` 唯一索引表达启用 scope；禁用行的 key 为 `NULL`，可保留多条历史。没有匹配策略时，仅允许 `caller_type=internal` 的受信调用。兼容适配器产生的现有内部调用上下文标记为 `internal`，HTTP 进入 Operation Graph 时按现有身份约定取 `roles` 的首个角色，避免丢失角色后误走内部默认权限。
 
 `action/prepare` 工具只生成待确认草稿，不得产生外部副作用，可以直接执行，但结果必须标记需要确认。`action/commit` 工具会产生外部副作用，始终要求人工确认，策略不得将其关闭。查询或分析工具可按需要额外开启确认。
 
@@ -149,13 +154,16 @@ capability
 - `implementation_ref`
 - `tenant_id`、`user_id`、`role`、`caller_type`
 - `policy_id`
+- `tool_key_snapshot`、`capability_snapshot`、`version_snapshot`
+- `policy_snapshot`：决策、额度、确认要求和拒绝原因的不可变快照
+- `confirmation_token_hash`：仅确认成功消费时写入，数据库唯一
 - `decision`：`allowed | denied | rate_limited | confirmation_required`
 - `gray_bucket`、`selected_stable`
 - `status`、`duration_ms`、`error_code`
 - `argument_hash`、可选脱敏参数摘要
 - `created_at`
 
-审计表不保存完整敏感参数。业务证据继续使用现有 Evidence 机制，审计记录通过 `trace_id` 与其关联。
+审计表不保存完整敏感参数或确认令牌明文。即使策略后来被软下线，或外键因其他治理操作变为空，快照字段仍能还原拒绝/允许时解析出的工具、版本、实现、策略和灰度桶。业务证据继续使用现有 Evidence 机制，审计记录通过 `trace_id` 与其关联。Gateway 以全局 trace 为首选、`ToolContext.request_id` 为次选，最后才生成 trace，并将该 canonical trace 显式写回 BaseTool 输入，保证 HTTP、Graph、MCP/SSE 和审计一致。
 
 ## 5. 运行时接口与数据流
 
@@ -169,8 +177,8 @@ capability
 
 1. 按 `capability` 查找已启用工具。
 2. 筛选 `published` 版本。
-3. 解析灰度候选版本对应的租户、角色策略。
-4. 使用 `tenant_id` 一致性哈希计算 `0-99` 灰度桶；灰度候选被允许且命中比例时选择它，否则选择稳定版本。
+3. 逐个解析灰度候选版本可继承的租户、角色权限；无策略或拒绝的候选跳过，发布动作绝不自动合成 allow 策略。
+4. 使用 `tenant_id` 一致性哈希计算 `0-99` 灰度桶；候选权限允许且命中版本自身的 `gray_percentage` 时选择它，否则选择稳定版本。
 5. 解析所选版本的最终策略并检查权限。
 6. 按所选版本检查每分钟限流。
 7. 对 `action/commit` 校验动作确认凭证；`action/prepare` 只允许生成待确认草稿。
@@ -178,7 +186,7 @@ capability
 9. 调用 `BaseTool.execute()`。
 10. 记录策略决策和执行结果。
 
-没有 `tenant_id` 的调用不参与灰度，始终选择稳定版本。哈希算法和盐值固定并纳入测试，保证同一租户在配置不变时稳定命中同一版本。版本级策略只影响对应候选版本；灰度候选被拒绝时回到稳定版本，再独立校验稳定版本策略，不把灰度策略错误地继承给稳定版本。
+没有 `tenant_id` 的调用不参与灰度，始终选择稳定版本。哈希算法和盐值固定并纳入测试，保证同一租户在配置不变时稳定命中同一版本。灰度百分比与授权严格分离：版本字段只做流量选择，候选和稳定版本分别解析权限；候选无匹配策略或被拒绝时跳过候选，再独立校验稳定版本，不自动放行，也不把候选策略继承给稳定版本。
 
 ### 5.1 动作确认凭证
 
@@ -190,7 +198,7 @@ capability
 - 确认人
 - 签发与过期时间
 
-执行前必须校验版本、参数摘要、确认人和有效期。任何字段不匹配都返回“需要重新确认”，不得执行动作工具。
+执行前必须校验版本、参数摘要、确认人和有效期。任何字段不匹配都返回“需要重新确认”，不得执行动作工具。签名挑战保持现有公开的 Gateway 签发/回传流程；它不是独立审批系统。每次挑战包含随机 nonce，验证成功后在执行副作用前将令牌哈希写入审计表，依赖数据库唯一索引原子消费；重复提交、跨进程竞态或消费持久化失败都不得执行工具。
 
 ### 5.2 缓存与降级
 
@@ -239,7 +247,7 @@ Registry 使用进程内只读缓存：
 |---|---|
 | 工具不存在、关闭或无已发布版本 | 返回“能力不可用”，不暴露内部实现名 |
 | 权限拒绝 | 返回 403，记录命中的策略 |
-| 触发限流 | 返回 429，并返回下一窗口的可重试秒数 |
+| 触发限流 | 返回 429，在标准信封 `data.retry_after_seconds` 中返回下一窗口的可重试秒数，并设置 `Retry-After` 响应头 |
 | `action/commit` 未确认或确认失效 | 返回“需要确认”，不执行工具 |
 | 灰度未命中 | 使用稳定版本 |
 | 灰度版本执行失败 | 记录失败，不自动重放稳定版本 |
@@ -273,9 +281,11 @@ Registry 使用进程内只读缓存：
 
 Agent 和 MCP 使用 Registry 内部服务接口，不通过管理 HTTP API 调用工具。
 
+MCP 保持既有公共工具名与 callable 参数名。构建 Server 时从 Registry 版本读取 `input_schema`，移除内部 `context` 后校验其字段和 JSON 类型与公开 callable 兼容，再把该 schema 作为 FastMCP 输入 schema 并在运行时严格验证；不兼容配置使构建失败。公共 `GET /api/v1/tools` 通过同一 `discover_tools` 枚举，只返回调用方可见且可发布的工具，同时保持原有 `name/description` 响应形状。
+
 ## 8. 兼容与迁移
 
-现有工具使用幂等初始化过程迁移：
+现有工具使用创建式幂等初始化过程迁移：
 
 | 旧工具名 | capability | 类型 |
 |---|---|---|
@@ -289,7 +299,7 @@ Agent 和 MCP 使用 Registry 内部服务接口，不通过管理 HTTP API 调�
 迁移步骤：
 
 1. 增加数据库表、执行器目录、Registry 服务和 Tool Gateway，不改变现有调用链。
-2. 幂等写入现有工具定义和 `1.0.0` 版本，标记为 `published + stable`。
+2. 仅当对应层级完全缺失时写入工具定义、初始 `1.0.0 published + stable` 版本和默认 allow 策略；任何已存在定义、版本或策略（包括禁用、退役、deny 和更新版本）均视为受治理状态，不被 seed 覆盖或恢复。
 3. 增加 `TOOL_REGISTRY_MODE=legacy | database`，初始默认 `legacy`。
 4. 旧工具名通过兼容适配器映射到 capability，现有内部上下文标记为 `caller_type=internal`。
 5. 在测试环境切换到 `database`，验证 Agent、MCP、API、Evidence 和审计链路。
@@ -333,6 +343,9 @@ Agent 和 MCP 使用 Registry 内部服务接口，不通过管理 HTTP API 调�
 - 非管理员修改策略。
 - 跨租户调用。
 - 确认后篡改动作参数。
+- 同一确认令牌跨 Gateway/进程重复提交。
+- HTTP 角色列表进入 Graph 后仍命中角色 deny。
+- seed 重跑不恢复禁用、退役或 deny 状态。
 
 ## 10. 验收标准
 

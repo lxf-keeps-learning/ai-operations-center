@@ -4,14 +4,25 @@ from collections.abc import Iterator
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.tool_center.base_tool import BaseTool
-from app.tool_center.contracts import BaseToolInput
-from app.tool_center.exceptions import RegistryConfigurationError, ToolNotFoundError
+from app.tool_center.contracts import BaseToolInput, ToolContext
+from app.tool_center.exceptions import (
+    RegistryConfigurationError,
+    ToolForbiddenError,
+    ToolNotFoundError,
+)
 from app.tool_registry.executor_catalog import ExecutorCatalog
-from app.tool_registry.models import ToolDefinition, ToolPolicy, ToolVersion
-from app.tool_registry.schemas import PolicySpec, ToolCreateRequest, VersionCreateRequest
+from app.tool_registry.models import ToolCallAudit, ToolDefinition, ToolPolicy, ToolVersion
+from app.tool_registry.registry import DatabaseToolRegistry
+from app.tool_registry.schemas import (
+    PolicySpec,
+    ToolCreateRequest,
+    ToolUpdateRequest,
+    VersionCreateRequest,
+)
 from app.tool_registry.service import ToolRegistryService
 
 from tests.tool_registry._helpers import make_sqlite_session_factory
@@ -108,6 +119,39 @@ def test_create_tool_rejects_duplicate_key(service: ToolRegistryService) -> None
         _create_query_tool(service, "dup_tool")
 
 
+def test_create_tool_rejects_duplicate_capability(service: ToolRegistryService) -> None:
+    _create_query_tool(service, "first_tool")
+
+    with pytest.raises(RegistryConfigurationError, match="capability"):
+        service.create_tool(
+            ToolCreateRequest(
+                tool_key="second_tool",
+                capability="query.first_tool",
+                name="second",
+                description="second",
+                tool_type="query",
+            ),
+            operator_id="admin",
+        )
+
+
+def test_create_tool_maps_concurrent_unique_conflict(
+    service: ToolRegistryService,
+    monkeypatch,
+) -> None:
+    def raise_unique(_definition):
+        raise IntegrityError(
+            "INSERT",
+            {},
+            RuntimeError("UNIQUE constraint failed: tool_definitions.capability"),
+        )
+
+    monkeypatch.setattr(service.repository, "save_definition", raise_unique)
+
+    with pytest.raises(RegistryConfigurationError, match="capability"):
+        _create_query_tool(service, "race_tool")
+
+
 def test_create_version_defaults_to_draft(service: ToolRegistryService, db: Session) -> None:
     _create_query_tool(service, "new_tool")
     _create_version(service, "new_tool", "1.0.0")
@@ -132,6 +176,26 @@ def test_create_version_validates_schema(service: ToolRegistryService) -> None:
             ),
             operator_id="admin",
         )
+
+
+def test_create_version_maps_concurrent_unique_conflict(
+    service: ToolRegistryService,
+    monkeypatch,
+) -> None:
+    _create_query_tool(service, "version_race")
+    monkeypatch.setattr(service.repository, "get_version", lambda *_args: None)
+
+    def raise_unique(_version):
+        raise IntegrityError(
+            "INSERT",
+            {},
+            RuntimeError("UNIQUE constraint failed: tool_versions.tool_id, tool_versions.version"),
+        )
+
+    monkeypatch.setattr(service.repository, "save_version", raise_unique)
+
+    with pytest.raises(RegistryConfigurationError, match="version"):
+        _create_version(service, "version_race", "1.0.0")
 
 
 def test_publish_rejects_unbound_executor(service: ToolRegistryService, db: Session) -> None:
@@ -190,7 +254,10 @@ def test_publish_second_stable_retires_previous(service: ToolRegistryService, db
     assert new.is_stable is True
 
 
-def test_publish_gray_updates_version_policy(service: ToolRegistryService, db: Session) -> None:
+def test_publish_gray_stores_rollout_percentage_without_permission_policy(
+    service: ToolRegistryService,
+    db: Session,
+) -> None:
     _create_query_tool(service, "new_tool")
     _create_version(service, "new_tool", "1.0.0")
     _create_version(service, "new_tool", "1.1.0")
@@ -206,11 +273,55 @@ def test_publish_gray_updates_version_policy(service: ToolRegistryService, db: S
 
     assert gray.status == "published"
     assert gray.is_stable is False
+    assert gray.gray_percentage == 30
     policies = db.scalars(select(ToolPolicy).where(ToolPolicy.version_id == gray.id)).all()
-    assert len(policies) == 1
-    assert policies[0].gray_percentage == 30
-    assert policies[0].tenant_id is None
-    assert policies[0].role is None
+    assert policies == []
+
+
+@pytest.mark.parametrize("with_tool_deny", [False, True])
+def test_publish_gray_never_synthesizes_permission_allow(
+    service: ToolRegistryService,
+    db: Session,
+    with_tool_deny: bool,
+) -> None:
+    _create_query_tool(service, "governed_tool")
+    _create_version(service, "governed_tool", "1.0.0")
+    _create_version(service, "governed_tool", "1.1.0")
+    service.publish_version(
+        "governed_tool",
+        "1.0.0",
+        release_type="stable",
+        operator_id="admin",
+    )
+    if with_tool_deny:
+        service.replace_policies(
+            "governed_tool",
+            [PolicySpec(decision="deny")],
+            operator_id="admin",
+        )
+
+    gray = service.publish_version(
+        "governed_tool",
+        "1.1.0",
+        release_type="gray",
+        gray_percentage=100,
+        operator_id="admin",
+    )
+
+    version_policies = db.scalars(
+        select(ToolPolicy).where(ToolPolicy.version_id == gray.id)
+    ).all()
+    assert version_policies == []
+    registry = DatabaseToolRegistry(lambda: service.repository.load_snapshot())
+    with pytest.raises(ToolForbiddenError):
+        registry.resolve(
+            "query.governed_tool",
+            ToolContext(
+                caller_type="external",
+                tenant_id="tenant-a",
+                role="operator",
+            ),
+        )
 
 
 def test_commit_action_cannot_disable_confirmation(service: ToolRegistryService) -> None:
@@ -271,12 +382,73 @@ def test_replace_policies_replaces_all(service: ToolRegistryService, db: Session
     )
 
     rows = db.scalars(select(ToolPolicy).where(ToolPolicy.tool_id == tool.id)).all()
-    assert len(rows) == 1
-    assert rows[0].tenant_id == "tenant-a"
-    assert rows[0].role == "operator"
-    assert rows[0].decision == "deny"
-    assert rows[0].rate_limit_per_minute == 10
-    assert rows[0].version_id is not None
+    assert len(rows) == 2
+    historical = next(row for row in rows if not row.enabled)
+    active = next(row for row in rows if row.enabled)
+    assert historical.decision == "allow"
+    assert historical.active_scope_key is None
+    assert active.tenant_id == "tenant-a"
+    assert active.role == "operator"
+    assert active.decision == "deny"
+    assert active.rate_limit_per_minute == 10
+    assert active.version_id is not None
+
+
+def test_replace_policies_preserves_historical_audit_reference(
+    service: ToolRegistryService,
+    db: Session,
+) -> None:
+    _create_query_tool(service, "audit_policy_tool")
+    tool = _tool_orm(db, "audit_policy_tool")
+    old_policy = ToolPolicy(
+        tool_id=tool.id,
+        version_id=None,
+        tenant_id=None,
+        role=None,
+        decision="allow",
+        rate_limit_per_minute=60,
+        gray_percentage=0,
+        requires_confirmation=False,
+        enabled=True,
+    )
+    db.add(old_policy)
+    db.flush()
+    audit = ToolCallAudit(
+        trace_id="trace-policy-history",
+        tool_id=tool.id,
+        version_id=None,
+        implementation_ref=None,
+        tenant_id="tenant-a",
+        user_id="operator",
+        role="operator",
+        caller_type="internal",
+        policy_id=old_policy.id,
+        decision="allowed",
+        status="success",
+        argument_hash="hash-policy-history",
+    )
+    db.add(audit)
+    db.commit()
+
+    service.replace_policies(
+        "audit_policy_tool",
+        [PolicySpec(decision="deny")],
+        operator_id="policy-admin",
+    )
+    db.refresh(audit)
+
+    historical = db.get(ToolPolicy, old_policy.id)
+    assert historical is not None
+    assert historical.enabled is False
+    assert audit.policy_id == old_policy.id
+    active = db.scalars(
+        select(ToolPolicy).where(
+            ToolPolicy.tool_id == tool.id,
+            ToolPolicy.enabled.is_(True),
+        )
+    ).all()
+    assert len(active) == 1
+    assert active[0].decision == "deny"
 
 
 def test_retire_published_version(service: ToolRegistryService) -> None:
@@ -288,6 +460,57 @@ def test_retire_published_version(service: ToolRegistryService) -> None:
 
     assert retired.status == "retired"
     assert retired.is_stable is False
+
+
+def test_management_mutations_persist_operator_ids(
+    service: ToolRegistryService,
+    db: Session,
+) -> None:
+    service.create_tool(
+        ToolCreateRequest(
+            tool_key="operator_tool",
+            capability="query.operator",
+            name="operator",
+            description="operator",
+            tool_type="query",
+        ),
+        operator_id="creator-1",
+    )
+    service.update_tool(
+        "operator_tool",
+        ToolUpdateRequest(description="updated"),
+        operator_id="editor-1",
+    )
+    service.create_version(
+        "operator_tool",
+        VersionCreateRequest(
+            version="1.0.0",
+            implementation_ref="builtin.stub",
+            input_schema={"type": "object"},
+            output_schema={"type": "object"},
+        ),
+        operator_id="version-creator-1",
+    )
+    service.publish_version(
+        "operator_tool",
+        "1.0.0",
+        release_type="stable",
+        operator_id="publisher-1",
+    )
+    retired = service.retire_version(
+        "operator_tool",
+        "1.0.0",
+        operator_id="retirer-1",
+    )
+    definition = _tool_orm(db, "operator_tool")
+
+    assert definition.created_by == "creator-1"
+    assert definition.updated_by == "editor-1"
+    assert retired.created_by == "version-creator-1"
+    assert retired.updated_by == "retirer-1"
+    assert retired.published_by == "publisher-1"
+    assert retired.retired_by == "retirer-1"
+    assert retired.retired_at is not None
 
 
 def test_publish_unknown_tool_raises_not_found(service: ToolRegistryService) -> None:
@@ -325,5 +548,28 @@ def test_publish_locks_definition_row(service: ToolRegistryService, monkeypatch)
 
     monkeypatch.setattr(service.repository, "get_definition", spy)
     service.publish_version("lock_tool", "1.0.0", release_type="stable", operator_id="admin")
+
+    assert calls == [True]
+
+
+def test_replace_policies_locks_definition_row(
+    service: ToolRegistryService,
+    monkeypatch,
+) -> None:
+    _create_query_tool(service, "policy_lock_tool")
+    calls: list[bool] = []
+    original = service.repository.get_definition
+
+    def spy(tool_key: str, *, for_update: bool = False):
+        calls.append(for_update)
+        return original(tool_key, for_update=for_update)
+
+    monkeypatch.setattr(service.repository, "get_definition", spy)
+
+    service.replace_policies(
+        "policy_lock_tool",
+        [PolicySpec(decision="allow")],
+        operator_id="admin",
+    )
 
     assert calls == [True]

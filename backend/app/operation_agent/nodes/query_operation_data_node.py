@@ -256,10 +256,14 @@ def _tool_context(state: OperationState) -> ToolContext:
     request_id 使用 state 中的 trace_id，确保 Tool 层的 trace 与请求链路一致。
     """
     user_context = state.get("user_context", {})
+    roles = user_context.get("roles")
+    role = user_context.get("role")
+    if role is None and isinstance(roles, list) and roles:
+        role = roles[0]
     return ToolContext(
         user_id=user_context.get("user_id") or user_context.get("userId"),
         tenant_id=user_context.get("tenant_id") or user_context.get("tenantId"),
-        role=user_context.get("role"),
+        role=role,
         caller_type="internal",
         request_id=state.get("trace_id"),
     )

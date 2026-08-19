@@ -3,6 +3,7 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.config.settings import settings
 from app.core.context.context_holder import get_user_context
 from app.core.exception.base_exception import AppException
 from app.core.exception.error_code import (
@@ -22,8 +23,7 @@ from app.tool_center.exceptions import (
     ToolNotFoundError,
     ToolRateLimitedError,
 )
-from app.tool_center.registry import get_tool, list_tools
-from app.tool_registry.compat import execute_tool
+from app.tool_registry.compat import discover_tools, execute_tool
 
 router = APIRouter(tags=["Tool Center"])
 
@@ -45,7 +45,15 @@ class ToolDescriptor(BaseModel):
 
 @router.get("/tools", response_model=ApiResponse[list[ToolDescriptor]])
 def get_tools() -> ApiResponse[list[ToolDescriptor]]:
-    tools = [get_tool(name) for name in sorted(list_tools())]
+    user = get_user_context()
+    tools = discover_tools(
+        ToolContext(
+            user_id=user.user_id,
+            tenant_id=user.org_id or None,
+            role=user.roles[0] if user.roles else None,
+            caller_type="external",
+        )
+    )
     return ApiResponse(
         data=[
             ToolDescriptor(name=tool.name, description=tool.description)
@@ -86,7 +94,7 @@ def call_tool(payload: ToolCallRequest) -> ApiResponse[dict]:
         message = exc.message
         if retry_after is not None:
             message = f"{exc.message}; retry after {retry_after}s"
-        raise AppException.from_error_code(RATE_LIMIT, message=message) from exc
+        raise _rate_limit_exception(message, retry_after) from exc
     except RegistryUnavailableError as exc:
         raise AppException.from_error_code(DB_CONNECTION_ERROR, message=exc.message) from exc
     except RegistryConfigurationError as exc:
@@ -110,7 +118,7 @@ def call_tool(payload: ToolCallRequest) -> ApiResponse[dict]:
         message = result.error.message if result.error else "rate limited"
         if retry_after is not None:
             message = f"{message}; retry after {retry_after}s"
-        raise AppException.from_error_code(RATE_LIMIT, message=message)
+        raise _rate_limit_exception(message, retry_after)
     if error_code == "TOOL_CAPABILITY_UNAVAILABLE":
         raise AppException.from_error_code(
             NOT_FOUND,
@@ -128,3 +136,25 @@ def call_tool(payload: ToolCallRequest) -> ApiResponse[dict]:
         )
     # 其余工具执行失败保持原有行为：随标准响应包返回执行结果
     return ApiResponse(data=result.model_dump())
+
+
+def _rate_limit_exception(
+    message: str,
+    retry_after_seconds: int | None,
+) -> AppException:
+    data = (
+        {"retry_after_seconds": retry_after_seconds}
+        if retry_after_seconds is not None
+        else None
+    )
+    headers = (
+        {"Retry-After": str(retry_after_seconds)}
+        if retry_after_seconds is not None
+        else None
+    )
+    return AppException.from_error_code(
+        RATE_LIMIT,
+        message=message,
+        data=data,
+        headers=headers,
+    )

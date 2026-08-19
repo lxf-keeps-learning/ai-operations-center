@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from jsonschema import ValidationError
 import pytest
+from mcp.server.fastmcp.exceptions import ToolError as FastMCPToolError
 
 from app.mcp_adapter import server as server_module
 from app.mcp_adapter import tools as adapter
 from app.tool_center.contracts import ToolResult
+from app.tool_center.exceptions import RegistryConfigurationError
 from app.tool_registry.contracts import ToolDescriptor, ToolType
 
 PUBLIC_MCP_NAMES = {
@@ -16,7 +19,13 @@ PUBLIC_MCP_NAMES = {
 }
 
 
-def _descriptor(capability: str, tool_key: str, description: str) -> ToolDescriptor:
+def _descriptor(
+    capability: str,
+    tool_key: str,
+    description: str,
+    *,
+    input_schema: dict | None = None,
+) -> ToolDescriptor:
     return ToolDescriptor(
         tool_id=1,
         tool_key=tool_key,
@@ -27,7 +36,7 @@ def _descriptor(capability: str, tool_key: str, description: str) -> ToolDescrip
         action_phase=None,
         version_id=11,
         version="1.0.0",
-        input_schema={"type": "object"},
+        input_schema=input_schema or {"type": "object"},
         output_schema={"type": "object"},
         rate_limit_per_minute=60,
         selected_stable=True,
@@ -145,3 +154,141 @@ async def test_fastmcp_lists_governed_tools(monkeypatch) -> None:
     kpi = next(tool for tool in tools if tool.name == "ioc_query_kpi")
     assert kpi.description == KPI_DESCRIPTOR.description
     assert kpi.inputSchema["type"] == "object"
+
+
+@pytest.mark.anyio
+async def test_mcp_query_schema_comes_from_registry_and_validates_nested_filters(
+    monkeypatch,
+) -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "context": {"type": "object"},
+            "filters": {
+                "type": "object",
+                "properties": {
+                    "department": {"type": "string", "minLength": 2},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                },
+                "required": ["department"],
+                "additionalProperties": False,
+            },
+        },
+        "required": ["filters"],
+        "additionalProperties": False,
+    }
+    descriptors = [
+        _descriptor(
+            "query.kpi",
+            "kpi_query",
+            "strict KPI",
+            input_schema=schema,
+        ),
+        ALARM_DESCRIPTOR,
+        RISK_DESCRIPTOR,
+        WORK_ORDER_DESCRIPTOR,
+        ANALYSIS_DESCRIPTOR,
+    ]
+    monkeypatch.setattr(server_module, "discover_tools", lambda context: descriptors)
+
+    mcp = server_module.build_mcp_server()
+    listed = await mcp.list_tools()
+    kpi = next(tool for tool in listed if tool.name == "ioc_query_kpi")
+
+    assert "context" not in kpi.inputSchema["properties"]
+    assert kpi.inputSchema["properties"]["filters"]["properties"]["limit"] == {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100,
+    }
+    with pytest.raises(FastMCPToolError):
+        await _registered_tool(mcp, "ioc_query_kpi").run(
+            {"filters": {"department": "A", "limit": 0}}
+        )
+
+
+def test_mcp_query_wrapper_does_not_normalize_invalid_falsy_filters(
+    monkeypatch,
+) -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "context": {"type": "object"},
+            "filters": {"type": "object"},
+        },
+        "additionalProperties": False,
+    }
+    descriptors = [
+        _descriptor("query.kpi", "kpi_query", "strict KPI", input_schema=schema),
+        ALARM_DESCRIPTOR,
+        RISK_DESCRIPTOR,
+        WORK_ORDER_DESCRIPTOR,
+        ANALYSIS_DESCRIPTOR,
+    ]
+    monkeypatch.setattr(server_module, "discover_tools", lambda context: descriptors)
+    mcp = server_module.build_mcp_server()
+
+    with pytest.raises(ValidationError):
+        _registered_tool(mcp, "ioc_query_kpi").fn("")
+
+
+def test_mcp_build_rejects_registry_schema_incompatible_with_public_callable(
+    monkeypatch,
+) -> None:
+    incompatible = _descriptor(
+        "query.kpi",
+        "kpi_query",
+        "bad KPI",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "context": {"type": "object"},
+                "unsupported": {"type": "string"},
+            },
+        },
+    )
+    monkeypatch.setattr(
+        server_module,
+        "discover_tools",
+        lambda context: [
+            incompatible,
+            ALARM_DESCRIPTOR,
+            RISK_DESCRIPTOR,
+            WORK_ORDER_DESCRIPTOR,
+            ANALYSIS_DESCRIPTOR,
+        ],
+    )
+
+    with pytest.raises(RegistryConfigurationError, match="schema|callable"):
+        server_module.build_mcp_server()
+
+
+def test_mcp_build_rejects_registry_property_type_incompatible_with_callable(
+    monkeypatch,
+) -> None:
+    incompatible = _descriptor(
+        "query.kpi",
+        "kpi_query",
+        "bad KPI filter type",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "context": {"type": "object"},
+                "filters": {"type": "string"},
+            },
+        },
+    )
+    monkeypatch.setattr(
+        server_module,
+        "discover_tools",
+        lambda context: [
+            incompatible,
+            ALARM_DESCRIPTOR,
+            RISK_DESCRIPTOR,
+            WORK_ORDER_DESCRIPTOR,
+            ANALYSIS_DESCRIPTOR,
+        ],
+    )
+
+    with pytest.raises(RegistryConfigurationError, match="filters|callable"):
+        server_module.build_mcp_server()

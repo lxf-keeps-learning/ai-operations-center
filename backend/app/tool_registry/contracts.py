@@ -51,6 +51,7 @@ class ToolVersionRecord:
     output_schema: Mapping[str, object]
     status: VersionStatus
     is_stable: bool
+    gray_percentage: int = 0
 
 
 @dataclass(frozen=True)

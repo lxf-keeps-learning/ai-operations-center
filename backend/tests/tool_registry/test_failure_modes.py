@@ -31,6 +31,7 @@ KPI_GRAY = make_version(
     version="1.1.0",
     implementation_ref="builtin.kpi_query.v110",
     is_stable=False,
+    gray_percentage=100,
 )
 KPI_POLICY = make_policy(1, 1)
 GRAY_POLICY = make_policy(2, 1, version_id=12, gray_percentage=100)

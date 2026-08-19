@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
 from typing import Any
 
 from sqlalchemy import (
@@ -14,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -44,6 +46,8 @@ class ToolDefinition(Base):
     tool_type: Mapped[str] = mapped_column(String(32), nullable=False)
     action_phase: Mapped[str | None] = mapped_column(String(32), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_local)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -91,8 +95,13 @@ class ToolVersion(Base):
     output_schema: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
     is_stable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    gray_percentage: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     published_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    retired_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_local)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -125,6 +134,16 @@ class ToolPolicy(Base):
             "enabled",
         ),
         Index("ix_tool_policies_enabled", "enabled"),
+        Index(
+            "ux_tool_policies_active_scope",
+            "tool_id",
+            "active_scope_key",
+            unique=True,
+        ),
+        CheckConstraint(
+            "enabled = 0 OR active_scope_key IS NOT NULL",
+            name="ck_tool_policies_active_scope_key",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -143,6 +162,7 @@ class ToolPolicy(Base):
     gray_percentage: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     requires_confirmation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    active_scope_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     updated_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_local)
     updated_at: Mapped[datetime] = mapped_column(
@@ -160,12 +180,42 @@ class ToolPolicy(Base):
     )
 
 
+def policy_scope_key(
+    version_id: int | None,
+    tenant_id: str | None,
+    role: str | None,
+) -> str:
+    def encode(value: object | None) -> str:
+        if value is None:
+            return "#"
+        text = str(value)
+        return f"{len(text)}:{text}"
+
+    raw_scope = "|".join(encode(value) for value in (version_id, tenant_id, role))
+    return hashlib.sha256(raw_scope.encode()).hexdigest()
+
+
+@event.listens_for(ToolPolicy, "before_insert")
+@event.listens_for(ToolPolicy, "before_update")
+def _sync_active_policy_scope(_mapper: object, _connection: object, target: ToolPolicy) -> None:
+    target.active_scope_key = (
+        policy_scope_key(target.version_id, target.tenant_id, target.role)
+        if target.enabled
+        else None
+    )
+
+
 class ToolCallAudit(Base):
     __tablename__ = "tool_call_audits"
     __table_args__ = (
         Index("ix_tool_call_audits_trace_id", "trace_id"),
         Index("ix_tool_call_audits_tool_created_at", "tool_id", "created_at"),
         Index("ix_tool_call_audits_policy_id", "policy_id"),
+        Index(
+            "ux_tool_call_audits_confirmation_token_hash",
+            "confirmation_token_hash",
+            unique=True,
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -178,6 +228,9 @@ class ToolCallAudit(Base):
         ForeignKey("tool_versions.id", ondelete="SET NULL"),
         nullable=True,
     )
+    tool_key_snapshot: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    capability_snapshot: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    version_snapshot: Mapped[str | None] = mapped_column(String(32), nullable=True)
     implementation_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tenant_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     user_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -187,6 +240,8 @@ class ToolCallAudit(Base):
         ForeignKey("tool_policies.id", ondelete="SET NULL"),
         nullable=True,
     )
+    policy_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    confirmation_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     decision: Mapped[str] = mapped_column(String(32), nullable=False)
     gray_bucket: Mapped[int | None] = mapped_column(Integer, nullable=True)
     selected_stable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)

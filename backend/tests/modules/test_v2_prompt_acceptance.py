@@ -52,7 +52,7 @@ def test_v2_migrations_form_one_resolvable_head() -> None:
     config = Config("alembic.ini")
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_heads() == ["20260819_0004"]
+    assert script.get_heads() == ["20260819_0005"]
     assert script.get_revision("20260728_0001").down_revision == "20260711_0006"
 
 

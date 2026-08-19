@@ -78,9 +78,37 @@ def test_create_tool_returns_envelope_and_persists(client: TestClient) -> None:
     assert payload["success"] is True
     assert payload["data"]["tool_key"] == "kpi_query"
     assert payload["data"]["capability"] == "query.kpi"
+    assert payload["data"]["created_by"] == "admin-1"
+    assert payload["data"]["updated_by"] == "admin-1"
 
     listed = client.get("/api/v1/tool-registry/tools", headers=ADMIN_HEADERS).json()
     assert [tool["tool_key"] for tool in listed["data"]] == ["kpi_query"]
+
+
+def test_create_tool_duplicate_capability_returns_registry_400(client: TestClient) -> None:
+    first = {
+        "tool_key": "first_tool",
+        "capability": "query.shared",
+        "name": "first",
+        "description": "first",
+        "tool_type": "query",
+    }
+    second = {**first, "tool_key": "second_tool", "name": "second"}
+    assert client.post(
+        "/api/v1/tool-registry/tools",
+        headers=ADMIN_HEADERS,
+        json=first,
+    ).status_code == 200
+
+    response = client.post(
+        "/api/v1/tool-registry/tools",
+        headers=ADMIN_HEADERS,
+        json=second,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == 400050
+    assert "capability" in response.json()["message"]
 
 
 def test_create_tool_without_admin_returns_403(client: TestClient) -> None:
@@ -130,6 +158,38 @@ def test_publish_validates_release_type(client: TestClient) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_create_version_response_exposes_rollout_and_operator_metadata(
+    client: TestClient,
+) -> None:
+    client.post(
+        "/api/v1/tool-registry/tools",
+        headers=ADMIN_HEADERS,
+        json={
+            "tool_key": "version_metadata_tool",
+            "capability": "query.version_metadata",
+            "name": "Version metadata",
+            "description": "Version metadata",
+            "tool_type": "query",
+        },
+    )
+
+    response = client.post(
+        "/api/v1/tool-registry/tools/version_metadata_tool/versions",
+        headers=ADMIN_HEADERS,
+        json={
+            "version": "1.0.0",
+            "implementation_ref": "builtin.kpi_query",
+            "input_schema": {"type": "object"},
+            "output_schema": {"type": "object"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["gray_percentage"] == 0
+    assert response.json()["data"]["created_by"] == "admin-1"
+    assert response.json()["data"]["updated_by"] == "admin-1"
 
 
 def test_publish_rejects_unbound_executor_with_400(client: TestClient) -> None:

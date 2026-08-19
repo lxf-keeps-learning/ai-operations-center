@@ -143,6 +143,46 @@ def test_denied_decision_is_audited() -> None:
         assert row.status == "failed"
         assert row.error_code == "TOOL_FORBIDDEN"
         assert row.policy_id == 2
+        assert row.tool_id == KPI.id
+        assert row.version_id == KPI_VERSION.id
+        assert row.implementation_ref == KPI_VERSION.implementation_ref
+        assert row.gray_bucket is None
+        assert row.selected_stable is True
+        assert row.tool_key_snapshot == KPI.tool_key
+        assert row.capability_snapshot == KPI.capability
+        assert row.version_snapshot == KPI_VERSION.version
+        assert row.policy_snapshot["decision"] == "deny"
+
+
+def test_no_policy_external_denial_keeps_immutable_resolution_snapshot() -> None:
+    external = INTERNAL.model_copy(update={"caller_type": "external"})
+    gateway, _loader, session_factory = build_gateway(
+        (KPI,),
+        (KPI_VERSION,),
+        (),
+        executors={"builtin.kpi_query": StubQueryTool()},
+    )
+
+    result = gateway.execute("query.kpi", {}, external)
+
+    assert result.success is False
+    assert result.error is not None
+    assert result.error.code == "TOOL_FORBIDDEN"
+    with session_factory() as session:
+        row = _audits(session)[0]
+        assert row.policy_id is None
+        assert row.tool_key_snapshot == KPI.tool_key
+        assert row.capability_snapshot == KPI.capability
+        assert row.version_snapshot == KPI_VERSION.version
+        assert row.implementation_ref == KPI_VERSION.implementation_ref
+        assert row.selected_stable is True
+        assert row.policy_snapshot == {
+            "policy_id": None,
+            "decision": "deny",
+            "rate_limit_per_minute": None,
+            "requires_confirmation": None,
+            "reason": "no_matching_policy",
+        }
 
 
 def test_rate_limited_decision_is_audited() -> None:

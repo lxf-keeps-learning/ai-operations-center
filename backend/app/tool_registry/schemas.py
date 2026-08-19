@@ -60,6 +60,8 @@ class ToolResponse(BaseModel):
     tool_type: str
     action_phase: str | None
     enabled: bool
+    created_by: str | None
+    updated_by: str | None
 
 
 class VersionResponse(BaseModel):
@@ -73,8 +75,13 @@ class VersionResponse(BaseModel):
     output_schema: dict[str, Any]
     status: str
     is_stable: bool
+    gray_percentage: int
     published_at: datetime | None
     published_by: str | None
+    retired_at: datetime | None
+    retired_by: str | None
+    created_by: str | None
+    updated_by: str | None
 
 
 class PolicyResponse(BaseModel):
@@ -90,6 +97,7 @@ class PolicyResponse(BaseModel):
     gray_percentage: int
     requires_confirmation: bool
     enabled: bool
+    updated_by: str | None
 
 
 class AuditResponse(BaseModel):
@@ -100,11 +108,15 @@ class AuditResponse(BaseModel):
     tool_id: int | None
     version_id: int | None
     implementation_ref: str | None
+    tool_key_snapshot: str | None
+    capability_snapshot: str | None
+    version_snapshot: str | None
     tenant_id: str | None
     user_id: str | None
     role: str | None
     caller_type: str
     policy_id: int | None
+    policy_snapshot: dict[str, Any] | None
     decision: str
     gray_bucket: int | None
     selected_stable: bool | None

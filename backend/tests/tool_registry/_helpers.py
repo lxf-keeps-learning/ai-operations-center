@@ -73,6 +73,7 @@ def make_version(
     implementation_ref: str = "",
     is_stable: bool = True,
     status: VersionStatus = VersionStatus.PUBLISHED,
+    gray_percentage: int = 0,
 ) -> ToolVersionRecord:
     return ToolVersionRecord(
         id=version_id,
@@ -83,6 +84,7 @@ def make_version(
         output_schema={"type": "object"},
         status=status,
         is_stable=is_stable,
+        gray_percentage=gray_percentage,
     )
 
 
@@ -174,6 +176,7 @@ def build_gateway(
     confirmation_secret: str = "unit-test-secret",
     clock: FakeClock | None = None,
     stale_query_ttl_seconds: int = 86400,
+    seed_registry_rows: bool = True,
 ) -> tuple[ToolGateway, SnapshotLoader, sessionmaker | None]:
     clock = clock or FakeClock()
     loader = SnapshotLoader(definitions, versions, policies, clock=clock)
@@ -184,7 +187,8 @@ def build_gateway(
         clock=clock,
     )
     session_factory = session_factory or make_sqlite_session_factory()
-    _seed_registry_rows(session_factory, definitions, versions, policies)
+    if seed_registry_rows:
+        _seed_registry_rows(session_factory, definitions, versions, policies)
     if repository_factory is None:
         repository_factory = lambda: ToolRegistryRepository(session_factory())
     catalog = ExecutorCatalog()
@@ -234,6 +238,7 @@ def _seed_registry_rows(
                     output_schema=dict(version.output_schema),
                     status=version.status.value,
                     is_stable=version.is_stable,
+                    gray_percentage=version.gray_percentage,
                 )
             )
         for policy in policies:

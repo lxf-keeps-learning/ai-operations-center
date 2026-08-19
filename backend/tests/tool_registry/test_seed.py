@@ -60,6 +60,11 @@ def test_seed_builtin_tools_is_idempotent(session: Session) -> None:
     assert all(policy.rate_limit_per_minute == 60 for policy in policies)
     assert all(policy.enabled for policy in policies)
     assert all(policy.version_id is None for policy in policies)
+    assert all(tool.created_by == "system" and tool.updated_by == "system" for tool in tools)
+    assert all(
+        version.created_by == "system" and version.updated_by == "system"
+        for version in versions
+    )
 
 
 def test_seed_marks_draft_tool_as_action_prepare(session: Session) -> None:
@@ -73,3 +78,71 @@ def test_seed_marks_draft_tool_as_action_prepare(session: Session) -> None:
     assert tool is not None
     assert tool.tool_type == "action"
     assert tool.action_phase == "prepare"
+
+
+def test_seed_rerun_preserves_disabled_retired_and_deny_governance(
+    session: Session,
+) -> None:
+    seed_builtin_tools(session)
+    definition = session.scalar(
+        select(ToolDefinition).where(ToolDefinition.tool_key == "kpi_query")
+    )
+    version = session.scalar(
+        select(ToolVersion).where(
+            ToolVersion.tool_id == definition.id,
+            ToolVersion.version == "1.0.0",
+        )
+    )
+    policy = session.scalar(
+        select(ToolPolicy).where(
+            ToolPolicy.tool_id == definition.id,
+            ToolPolicy.version_id.is_(None),
+            ToolPolicy.tenant_id.is_(None),
+            ToolPolicy.role.is_(None),
+        )
+    )
+    definition.enabled = False
+    version.status = "retired"
+    version.is_stable = False
+    policy.decision = "deny"
+    session.flush()
+
+    seed_builtin_tools(session)
+
+    assert definition.enabled is False
+    assert version.status == "retired"
+    assert version.is_stable is False
+    assert policy.decision == "deny"
+
+
+def test_seed_rerun_preserves_newer_stable_version(session: Session) -> None:
+    seed_builtin_tools(session)
+    definition = session.scalar(
+        select(ToolDefinition).where(ToolDefinition.tool_key == "alarm_query")
+    )
+    baseline = session.scalar(
+        select(ToolVersion).where(
+            ToolVersion.tool_id == definition.id,
+            ToolVersion.version == "1.0.0",
+        )
+    )
+    baseline.status = "retired"
+    baseline.is_stable = False
+    newer = ToolVersion(
+        tool_id=definition.id,
+        version="2.0.0",
+        implementation_ref="builtin.alarm_query.v2",
+        input_schema={"type": "object"},
+        output_schema={"type": "object"},
+        status="published",
+        is_stable=True,
+    )
+    session.add(newer)
+    session.flush()
+
+    seed_builtin_tools(session)
+
+    assert newer.status == "published"
+    assert newer.is_stable is True
+    assert baseline.status == "retired"
+    assert baseline.is_stable is False

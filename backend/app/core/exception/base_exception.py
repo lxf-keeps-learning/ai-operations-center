@@ -17,21 +17,30 @@ class AppException(Exception):
         message: str = INTERNAL_ERROR.message,
         http_status: int = INTERNAL_ERROR.http_status,
         data: Any = None,
+        headers: dict[str, str] | None = None,
     ):
         self.code = code
         self.message = message
         self.http_status = http_status
         self.data = data
+        self.headers = headers or {}
         super().__init__(message)
 
     @classmethod
-    def from_error_code(cls, error_code: ErrorCode, message: str | None = None, data: Any = None) -> "AppException":
+    def from_error_code(
+        cls,
+        error_code: ErrorCode,
+        message: str | None = None,
+        data: Any = None,
+        headers: dict[str, str] | None = None,
+    ) -> "AppException":
         """根据预定义的 ErrorCode 快速创建异常实例，可覆盖 message 和 data"""
         return cls(
             code=error_code.code,
             message=message or error_code.message,
             http_status=error_code.http_status,
             data=data,
+            headers=headers,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -41,4 +50,5 @@ class AppException(Exception):
             "message": self.message,
             "http_status": self.http_status,
             "data": self.data,
+            "headers": self.headers,
         }

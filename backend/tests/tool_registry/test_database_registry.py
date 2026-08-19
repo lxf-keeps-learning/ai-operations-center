@@ -37,6 +37,7 @@ KPI_GRAY = make_version(
     version="1.1.0",
     implementation_ref="builtin.kpi_query.v110",
     is_stable=False,
+    gray_percentage=100,
 )
 
 DRAFT_TOOL = make_definition(2, "draft_tool", "query.draft")
@@ -208,6 +209,30 @@ def test_resolve_gray_denied_falls_back_to_stable() -> None:
     resolved = registry.resolve("query.kpi", INTERNAL)
 
     assert resolved.version_id == 11
+    assert resolved.selected_stable is True
+    assert resolved.gray_bucket is not None
+
+
+def test_resolve_gray_without_matching_candidate_policy_falls_back_to_stable() -> None:
+    stable_allow = make_policy(7, 1, version_id=11)
+    unrelated_gray_policy = make_policy(
+        8,
+        1,
+        version_id=12,
+        tenant_id="another-tenant",
+        role="operator",
+        gray_percentage=100,
+    )
+    registry, _loader = _build_registry(
+        (KPI,),
+        (KPI_STABLE, KPI_GRAY),
+        (stable_allow, unrelated_gray_policy),
+    )
+
+    resolved = registry.resolve("query.kpi", EXTERNAL)
+
+    assert resolved.version_id == KPI_STABLE.id
+    assert resolved.policy_id == stable_allow.id
     assert resolved.selected_stable is True
     assert resolved.gray_bucket is not None
 

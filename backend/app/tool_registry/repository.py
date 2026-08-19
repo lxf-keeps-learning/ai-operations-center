@@ -112,6 +112,11 @@ class ToolRegistryRepository:
     def list_definitions(self) -> list[ToolDefinition]:
         return list(self.db.scalars(select(ToolDefinition).order_by(ToolDefinition.id)))
 
+    def get_definition_by_capability(self, capability: str) -> ToolDefinition | None:
+        return self.db.scalar(
+            select(ToolDefinition).where(ToolDefinition.capability == capability)
+        )
+
     def save_definition(self, definition: ToolDefinition) -> ToolDefinition:
         self.db.add(definition)
         self.db.flush()
@@ -302,6 +307,7 @@ class ToolRegistryRepository:
             output_schema=_freeze_json_mapping(version.output_schema),
             status=VersionStatus(version.status),
             is_stable=version.is_stable,
+            gray_percentage=version.gray_percentage,
         )
 
     def _to_policy_record(self, policy: ToolPolicy) -> ToolPolicyRecord:
