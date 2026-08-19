@@ -153,6 +153,22 @@ def test_tool_definition_rejects_invalid_type_and_action_phase_combinations(sess
     session.rollback()
     session.add(
         ToolDefinition(
+            tool_key="bad_action_phase",
+            capability="action.phase.bad",
+            name="Bad action phase",
+            description="Unsupported non-null action phase",
+            tool_type="action",
+            action_phase="execute",
+            enabled=True,
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+    session.rollback()
+    session.add(
+        ToolDefinition(
             tool_key="bad_type",
             capability="custom.bad",
             name="Bad type",
