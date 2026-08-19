@@ -48,9 +48,11 @@ def test_tool_registry_migration_creates_tables_constraints_and_indexes(monkeypa
         isinstance(argument, UniqueConstraint) and argument.name == "uk_tool_version"
         for argument in tool_versions_args
     )
+    assert not any(getattr(argument, "name", None) == "gray_percentage" for argument in tool_versions_args)
 
     tool_policies_args = next(args for args in created_tables if args[0] == "tool_policies")
     tool_call_audits_args = next(args for args in created_tables if args[0] == "tool_call_audits")
+    assert any(getattr(argument, "name", None) == "gray_percentage" for argument in tool_policies_args)
     assert sum(isinstance(argument, ForeignKeyConstraint) for argument in tool_policies_args) == 2
     assert sum(isinstance(argument, ForeignKeyConstraint) for argument in tool_call_audits_args) == 3
 

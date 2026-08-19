@@ -43,7 +43,6 @@ def upgrade() -> None:
         sa.Column("output_schema", sa.JSON(), nullable=False),
         sa.Column("status", sa.String(length=32), nullable=False),
         sa.Column("is_stable", sa.Boolean(), nullable=False),
-        sa.Column("gray_percentage", sa.Integer(), nullable=True),
         sa.Column("published_at", sa.DateTime(), nullable=True),
         sa.Column("published_by", sa.String(length=64), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
