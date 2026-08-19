@@ -75,3 +75,9 @@
 - Ruling（FR-11，兼容 API）：`GET /tools` 统一走双模式 `discover_tools`，保持 `name/description` 形状；429 保持标准信封并新增 `data.retry_after_seconds` 和 `Retry-After`。
 - Deferred：本轮 14 项无功能性 deferred/驳回。既有全量基线的两个 Analysis Stream 节点顺序失败继续按 Baseline 记录，未弱化或跳过。
 - Final verification：专项 `331 passed, 1 warning`；MCP 启用 `18 passed`；全量 `693 passed, 2 failed, 1 warning`，失败集合与 Baseline 完全相同；`compileall`、`git diff --check` 通过；Alembic `20260819_0005 (head)` 单 head。
+
+## Scope re-review blockers
+
+- Ruling（SR-1，confirmation canonicalization）：消费唯一键继续使用 canonical token 文本的 SHA-256，但 verify 只接受 `issue()` 输出的无 padding URL-safe Base64；解码后重新编码必须逐字相等。这样保留现有数据库/公开流程，同时拒绝 Python decoder 容忍的 payload/signature `=` 等价变体。HMAC、过期与 trace/tool/version/arguments/user 绑定顺序不变；确认消费事务失败仍 rollback，因此原 token 可再成功一次。
+- Ruling（SR-2，MCP required/null）：query MCP callable 根据 Registry public schema 的 `required` 动态选择必填或可选签名。required `filters` 的 missing 由 FastMCP 参数模型拒绝、null 由非空 dict 类型拒绝，二者都不进入 Gateway；optional missing/null 才兼容归一为 `{}`。公共工具名、字段名和 analysis callable 不变。
+- Scope re-review verification：confirmation/Gateway/Audit `35 passed`；MCP 启用 `20 passed`；完整专项 `340 passed, 1 warning`；全量 `702 passed, 2 failed, 1 warning`，失败集合仍与 Baseline 完全相同；`compileall`、`git diff --check` 通过，Alembic `20260819_0005 (head)` 单 head。

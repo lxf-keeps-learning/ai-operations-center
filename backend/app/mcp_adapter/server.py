@@ -56,10 +56,19 @@ def build_mcp_server() -> FastMCP:
 
 def _query_tool_fn(capability: str, input_schema: dict[str, Any]) -> Callable[..., str]:
     validator = _validator(input_schema)
+    required = input_schema.get("required", [])
 
-    def query(filters: dict[str, Any] | None = None) -> str:
-        validator.validate({"filters": filters if filters is not None else {}})
-        return execute_query_tool(capability, filters)
+    if isinstance(required, list) and "filters" in required:
+
+        def query(filters: dict[str, Any]) -> str:
+            validator.validate({"filters": filters})
+            return execute_query_tool(capability, filters)
+    else:
+
+        def query(filters: dict[str, Any] | None = None) -> str:
+            normalized_filters = filters if filters is not None else {}
+            validator.validate({"filters": normalized_filters})
+            return execute_query_tool(capability, normalized_filters)
 
     return query
 

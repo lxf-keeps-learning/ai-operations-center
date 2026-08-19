@@ -207,6 +207,102 @@ async def test_mcp_query_schema_comes_from_registry_and_validates_nested_filters
         )
 
 
+@pytest.mark.anyio
+async def test_fastmcp_required_filters_rejects_missing_and_null_before_gateway(
+    monkeypatch,
+) -> None:
+    required_schema = {
+        "type": "object",
+        "properties": {
+            "context": {"type": "object"},
+            "filters": {
+                "type": "object",
+                "properties": {"department": {"type": "string"}},
+                "additionalProperties": False,
+            },
+        },
+        "required": ["filters"],
+        "additionalProperties": False,
+    }
+    descriptors = [
+        _descriptor(
+            "query.kpi",
+            "kpi_query",
+            "required KPI filters",
+            input_schema=required_schema,
+        ),
+        ALARM_DESCRIPTOR,
+        RISK_DESCRIPTOR,
+        WORK_ORDER_DESCRIPTOR,
+        ANALYSIS_DESCRIPTOR,
+    ]
+    gateway_calls: list[dict] = []
+
+    def fake_execute_query_tool(capability, filters):
+        gateway_calls.append(filters)
+        return "ok"
+
+    monkeypatch.setattr(server_module, "discover_tools", lambda context: descriptors)
+    monkeypatch.setattr(server_module, "execute_query_tool", fake_execute_query_tool)
+    mcp = server_module.build_mcp_server()
+    tool = _registered_tool(mcp, "ioc_query_kpi")
+
+    with pytest.raises(FastMCPToolError):
+        await tool.run({})
+    with pytest.raises(FastMCPToolError):
+        await tool.run({"filters": None})
+    valid = await tool.run({"filters": {"department": "安全环保部"}})
+
+    assert valid == "ok"
+    assert gateway_calls == [{"department": "安全环保部"}]
+
+
+@pytest.mark.anyio
+async def test_fastmcp_optional_filters_defaults_missing_and_null_to_empty_object(
+    monkeypatch,
+) -> None:
+    optional_schema = {
+        "type": "object",
+        "properties": {
+            "context": {"type": "object"},
+            "filters": {"type": "object"},
+        },
+        "additionalProperties": False,
+    }
+    descriptors = [
+        _descriptor(
+            "query.kpi",
+            "kpi_query",
+            "optional KPI filters",
+            input_schema=optional_schema,
+        ),
+        ALARM_DESCRIPTOR,
+        RISK_DESCRIPTOR,
+        WORK_ORDER_DESCRIPTOR,
+        ANALYSIS_DESCRIPTOR,
+    ]
+    gateway_calls: list[dict] = []
+
+    def fake_execute_query_tool(capability, filters):
+        gateway_calls.append(filters)
+        return "ok"
+
+    monkeypatch.setattr(server_module, "discover_tools", lambda context: descriptors)
+    monkeypatch.setattr(server_module, "execute_query_tool", fake_execute_query_tool)
+    mcp = server_module.build_mcp_server()
+    tool = _registered_tool(mcp, "ioc_query_kpi")
+
+    await tool.run({})
+    await tool.run({"filters": None})
+    await tool.run({"filters": {"department": "安全环保部"}})
+
+    assert gateway_calls == [
+        {},
+        {},
+        {"department": "安全环保部"},
+    ]
+
+
 def test_mcp_query_wrapper_does_not_normalize_invalid_falsy_filters(
     monkeypatch,
 ) -> None:

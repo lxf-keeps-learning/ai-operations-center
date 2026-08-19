@@ -116,6 +116,12 @@ def _urlsafe_b64encode(value: bytes) -> str:
 def _urlsafe_b64decode(value: str) -> bytes:
     padding = "=" * (-len(value) % 4)
     try:
-        return base64.urlsafe_b64decode(value + padding)
+        decoded = base64.urlsafe_b64decode(value + padding)
     except (ValueError, binascii.Error) as exc:
         raise ConfirmationInvalidError("invalid confirmation token") from exc
+    # A signed byte sequence must have exactly one accepted textual form. Python's
+    # decoder tolerates extra padding and ignored characters, so compare against the
+    # unpadded URL-safe encoding emitted by issue() before deriving the consumption key.
+    if _urlsafe_b64encode(decoded) != value:
+        raise ConfirmationInvalidError("non-canonical confirmation token")
+    return decoded

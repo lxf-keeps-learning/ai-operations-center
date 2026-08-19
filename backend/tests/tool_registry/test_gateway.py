@@ -7,6 +7,7 @@ from app.tool_registry.contracts import ActionPhase, GovernanceDecision, ToolTyp
 
 from tests.tool_registry._helpers import (
     build_gateway,
+    make_sqlite_session_factory,
     make_definition,
     make_policy,
     make_version,
@@ -240,6 +241,99 @@ def test_commit_confirmation_is_consumed_once_across_gateway_instances() -> None
     assert replayed.success is False
     assert replayed.error is not None
     assert replayed.error.code == "TOOL_CONFIRMATION_REQUIRED"
+    assert tool.calls == 1
+
+
+def test_commit_confirmation_padding_variants_cannot_bypass_single_consumption() -> None:
+    gateway, _loader, _session_factory, tool = _commit_gateway()
+    set_trace_id("trace-commit-canonical")
+    try:
+        challenge = gateway.execute(
+            "action.work_order.commit",
+            {"draft_id": "d1"},
+            INTERNAL,
+        )
+        token = challenge.metadata["confirmation_token"]
+        payload, signature = token.split(".")
+        equivalent_padding_variants = (
+            f"{payload}=.{signature}",
+            f"{payload}.{signature}=",
+            f"{payload}=.{signature}=",
+        )
+
+        results = [
+            gateway.execute(
+                "action.work_order.commit",
+                {"draft_id": "d1"},
+                INTERNAL,
+                confirmation_token=candidate,
+            )
+            for candidate in (token, *equivalent_padding_variants)
+        ]
+    finally:
+        clear_trace_id()
+
+    assert results[0].success is True
+    assert all(result.success is False for result in results[1:])
+    assert all(
+        result.error is not None and result.error.code == "TOOL_CONFIRMATION_REQUIRED"
+        for result in results[1:]
+    )
+    assert tool.calls == 1
+
+
+def test_confirmation_consumption_rollback_allows_same_token_one_retry() -> None:
+    from app.tool_registry.repository import ToolRegistryRepository
+
+    tool = StubCommitTool()
+    failure_state = {"remaining": 1}
+    session_factory = make_sqlite_session_factory()
+
+    class FailFirstConfirmedAuditRepository(ToolRegistryRepository):
+        def append_audit(self, audit):
+            created = super().append_audit(audit)
+            if audit.confirmation_token_hash and failure_state["remaining"]:
+                failure_state["remaining"] -= 1
+                raise OSError("simulated transaction failure")
+            return created
+
+    gateway, _loader, _same_factory = build_gateway(
+        (COMMIT_TOOL,),
+        (COMMIT_VERSION,),
+        (COMMIT_POLICY,),
+        executors={"builtin.work_order_commit": tool},
+        session_factory=session_factory,
+        repository_factory=lambda: FailFirstConfirmedAuditRepository(
+            session_factory()
+        ),
+    )
+    set_trace_id("trace-confirmation-rollback")
+    try:
+        challenge = gateway.execute(
+            "action.work_order.commit",
+            {"draft_id": "d1"},
+            INTERNAL,
+        )
+        token = challenge.metadata["confirmation_token"]
+        failed = gateway.execute(
+            "action.work_order.commit",
+            {"draft_id": "d1"},
+            INTERNAL,
+            confirmation_token=token,
+        )
+        retried = gateway.execute(
+            "action.work_order.commit",
+            {"draft_id": "d1"},
+            INTERNAL,
+            confirmation_token=token,
+        )
+    finally:
+        clear_trace_id()
+
+    assert failed.success is False
+    assert failed.error is not None
+    assert failed.error.code == "TOOL_REGISTRY_CONFIGURATION_ERROR"
+    assert retried.success is True
     assert tool.calls == 1
 
 
