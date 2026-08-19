@@ -28,6 +28,18 @@ def test_window_resets_at_next_utc_minute_boundary() -> None:
     assert limiter.check("v1:t1", 1, now + timedelta(seconds=30)).allowed is True
 
 
+def test_blocked_retry_after_uses_ceiling_near_next_minute() -> None:
+    limiter = InMemoryFixedWindowRateLimiter()
+    now = datetime(2026, 8, 19, 10, 0, 59, 900000, tzinfo=UTC)
+
+    assert limiter.check("v1:t1", 1, now).allowed is True
+
+    denied = limiter.check("v1:t1", 1, now)
+
+    assert denied.allowed is False
+    assert denied.retry_after_seconds == 1
+
+
 def test_rate_limit_key_uses_internal_sentinel_without_tenant() -> None:
     assert rate_limit_key(version_id=12, tenant_id=None) == "12:__internal__"
     assert rate_limit_key(version_id=12, tenant_id="tenant-a") == "12:tenant-a"
