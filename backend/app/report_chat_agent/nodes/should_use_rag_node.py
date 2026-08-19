@@ -343,7 +343,7 @@ def _format_decision_prompt(state: ReportChatState) -> str:
     )
 
 
-def _llm_decision(state: ReportChatState, rule_decision: dict) -> dict | None:
+async def _llm_decision(state: ReportChatState, rule_decision: dict) -> dict | None:
     """调用 LLM 进行 RAG 需求分类。
 
     Returns:
@@ -354,7 +354,7 @@ def _llm_decision(state: ReportChatState, rule_decision: dict) -> dict | None:
         return None
 
     try:
-        result: LlmResult = llm_client.chat(
+        result: LlmResult = await llm_client.achat(
             prompt_content=None,
             user_message=prompt,
             timeout_seconds=settings.operation_llm_timeout_seconds,
@@ -531,7 +531,7 @@ def _complete_llm_anchors(state: ReportChatState, llm_decision: dict) -> dict:
 
 # ── Main Entry ──────────────────────────────────────────
 
-def should_use_rag_node(state: ReportChatState) -> ReportChatState:
+async def should_use_rag_node(state: ReportChatState) -> ReportChatState:
     """判断本轮用户问题是否需要调用 RAG 补充知识依据。
 
     Sprint6.1 升级为四层决策架构：
@@ -559,7 +559,7 @@ def should_use_rag_node(state: ReportChatState) -> ReportChatState:
     llm_attempted = False
     if settings.rag_use_llm_decision and not rule_decision.get("mandatory_rag"):
         llm_attempted = True
-        llm_decision = _llm_decision(state, rule_decision)
+        llm_decision = await _llm_decision(state, rule_decision)
 
     # Layer 4: Finalize。
     return _finalize_decision(state, rule_decision, llm_decision, llm_attempted=llm_attempted)

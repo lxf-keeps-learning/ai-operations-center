@@ -98,7 +98,7 @@ def get_messages(
 
 
 @router.post("/chat/sessions/{session_id}/messages", response_model=ApiResponse[SendMessageResponse])
-def send_message(
+async def send_message(
     session_id: str,
     payload: SendMessageRequest,
     db: Session = Depends(get_db),
@@ -109,7 +109,7 @@ def send_message(
     if session.report_id != payload.report_id:
         raise HTTPException(status_code=400, detail="会话与报告不匹配")
 
-    result = send_chat_message(
+    result = await send_chat_message(
         session_id=session_id,
         report_id=payload.report_id,
         question=payload.question,

@@ -100,8 +100,10 @@ class MockIocApiClient(IocApiClient):
     """本地开发和单元测试使用的 IOC Client。
 
     这里不调用数据库、不调用 LLM、不做业务分析，只模拟真实 IOC API 的数据访问契约。
+    异步方法为纯计算，可安全取消（无外部副作用）。
     """
 
+    # ── 同步便捷方法（纯内存计算，供测试与无异步上下文的旧调用点使用）──
     def get_kpis(self, filters: dict | None = None) -> IocApiResponse:
         return _response(KPI_DATA, filters, KPI_FILTERS)
 
@@ -112,4 +114,17 @@ class MockIocApiClient(IocApiClient):
         return _response(RISK_DATA, filters, RISK_FILTERS)
 
     def get_work_orders(self, filters: dict | None = None) -> IocApiResponse:
+        return _response(WORK_ORDER_DATA, filters, WORK_ORDER_FILTERS)
+
+    # ── 异步方法（Tool 层唯一入口，支持协作取消）───────────────────────
+    async def aget_kpis(self, filters: dict | None = None) -> IocApiResponse:
+        return _response(KPI_DATA, filters, KPI_FILTERS)
+
+    async def aget_alarms(self, filters: dict | None = None) -> IocApiResponse:
+        return _response(ALARM_DATA, filters, ALARM_FILTERS)
+
+    async def aget_risks(self, filters: dict | None = None) -> IocApiResponse:
+        return _response(RISK_DATA, filters, RISK_FILTERS)
+
+    async def aget_work_orders(self, filters: dict | None = None) -> IocApiResponse:
         return _response(WORK_ORDER_DATA, filters, WORK_ORDER_FILTERS)

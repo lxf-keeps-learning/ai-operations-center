@@ -1,17 +1,27 @@
 """Report Chat SSE 流式服务。
 
 执行流程（重构后）：
-  compiled_graph.astream()
-  → LangGraph StreamPart (mode, data)
-  → ReportChatEventAdapter
-  → SSE 字符串 → API StreamingResponse
+  SsePump（整体期限 / Graph 预算 / 空闲心跳 / 断连取消）
+    → producer: compiled_graph.astream()
+    → ReportChatEventAdapter
+    → SSE 字符串 → API StreamingResponse
 
 Graph 继续负责范围判断、报告证据、RAG 和持久化；LLM token 通过
 get_stream_writer() 实时回传。Adapter 负责答案校正（流式 vs 最终）。
+
+防卡死语义：
+  - Graph 预算 report_graph_timeout_seconds 到期 → 取消 Graph Task，
+    best-effort fail_turn 写失败状态，依次发送 message_failed(REPORT_TIMEOUT)
+    + stream_closed（只发一次）。
+  - 心跳 sse_heartbeat_interval_seconds 维持连接；客户端断连 → generator
+    aclose → pump 取消 producer。
 """
+import asyncio
 import logging
 from typing import AsyncGenerator
 
+from app.analysis_stream.sse_pump import SsePump
+from app.config.settings import settings
 from app.db.session import get_session_local
 from app.observability import build_langsmith_config
 from app.report_chat_agent.graph import report_chat_graph
@@ -34,7 +44,7 @@ async def stream_chat_message(
     user_id: str,
     trace_id: str,
 ) -> AsyncGenerator[str, None]:
-    """流式报告问答，由 compiled graph astream 驱动。"""
+    """流式报告问答，由 SsePump 驱动 compiled graph astream。"""
     # ── 构建初始 State（复用 service 层逻辑） ──────────────
     db = get_session_local()()
     try:
@@ -99,6 +109,9 @@ async def stream_chat_message(
         "_streaming": True,
     }
 
+    adapter = ReportChatEventAdapter(trace_id, session_id)
+    yield to_sse(*adapter.get_message_started())
+
     # ── 安全检查 ──────────────────────────────────────────
     if moderation.action in (ModerationAction.BLOCK, ModerationAction.ESCALATE):
         initial_state["final_answer"] = (
@@ -127,25 +140,55 @@ async def stream_chat_message(
         finally:
             blocked_db.close()
 
-        adapter = ReportChatEventAdapter(trace_id, session_id)
-        yield to_sse(*adapter.get_message_started())
         adapter.process("values", initial_state)
         for event_t, event_d in adapter.finalize():
             yield to_sse(event_t, event_d)
         yield to_sse(*adapter.get_closed_event())
         return
 
-    # ── compiled graph astream ─────────────────────────────
-    adapter = ReportChatEventAdapter(trace_id, session_id)
-    yield to_sse(*adapter.get_message_started())
+    # ── compiled graph astream（经 SsePump 防卡死） ────────
+    pump = SsePump(
+        lambda: _report_chat_producer(
+            initial_state,
+            adapter,
+            session_id,
+            user_id,
+            report_id,
+        ),
+        graph_timeout_seconds=settings.report_graph_timeout_seconds,
+        overall_timeout_seconds=settings.report_generation_timeout_seconds,
+        idle_timeout_seconds=settings.sse_idle_timeout_seconds,
+        heartbeat_interval_seconds=settings.sse_heartbeat_interval_seconds,
+        heartbeat_sse=to_sse(
+            "heartbeat",
+            {"trace_id": trace_id, "session_id": session_id},
+        ),
+        on_graph_timeout=lambda: _report_chat_timeout_events(
+            adapter,
+            runtime_session_id=runtime_session_id,
+        ),
+        on_failure=lambda exc: _report_chat_failure_events(adapter, str(exc)),
+    )
+    async for event in pump.run():
+        yield event
 
+
+async def _report_chat_producer(
+    initial_state: ReportChatState,
+    adapter: ReportChatEventAdapter,
+    session_id: str,
+    user_id: str,
+    report_id: int,
+) -> AsyncGenerator[str, None]:
+    """Graph astream 事件生产者：输出业务事件并负责正常终止事件。"""
+    trace_id = initial_state["trace_id"]
     try:
         graph_config = build_langsmith_config(
             trace_id=trace_id,
             graph_name="ioc_report_chat_graph",
             user_id=user_id,
             session_id=session_id,
-            conversation_id=session.conversation_id,
+            conversation_id=initial_state["conversation_id"],
             metadata={
                 "report_id": str(report_id),
                 "scene": initial_state["scene"],
@@ -186,6 +229,40 @@ async def stream_chat_message(
     except Exception as exc:
         logger.exception("Report Chat Graph 执行异常")
         yield to_sse(*adapter.get_failed_event(str(exc)))
-
-    finally:
         yield to_sse(*adapter.get_closed_event())
+        return
+
+    yield to_sse(*adapter.get_closed_event())
+
+
+def _report_chat_timeout_events(
+    adapter: ReportChatEventAdapter,
+    *,
+    runtime_session_id: str,
+) -> list[str]:
+    """Graph 超时：best-effort fail_turn + message_failed + stream_closed（只发一次）。"""
+    logger.warning("报告问答 Graph 超时，取消任务并写失败状态: runtime_session_id=%s", runtime_session_id)
+    db = get_session_local()()
+    try:
+        report_chat_repo.fail_turn(
+            db,
+            runtime_session_id=runtime_session_id,
+            error_message="报告生成超时",
+        )
+    except Exception:
+        logger.exception("报告问答超时写失败状态异常（不影响超时收尾）")
+    finally:
+        db.close()
+
+    return [
+        to_sse(*adapter.get_failed_event("报告生成超过时限，已停止生成")),
+        to_sse(*adapter.get_closed_event()),
+    ]
+
+
+def _report_chat_failure_events(adapter: ReportChatEventAdapter, error_message: str) -> list[str]:
+    """producer 异常兜底：message_failed + stream_closed（只发一次）。"""
+    return [
+        to_sse(*adapter.get_failed_event(error_message)),
+        to_sse(*adapter.get_closed_event()),
+    ]

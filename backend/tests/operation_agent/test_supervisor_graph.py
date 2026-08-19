@@ -15,7 +15,7 @@ from app.operation_agent.multi_agent.graph import (
 from app.operation_agent.nodes.init_context_node import init_context_node
 
 
-def _stub_expensive_parent_nodes(monkeypatch):
+async def _stub_expensive_parent_nodes(monkeypatch):
     for name in (
         "query_operation_data_node",
         "detect_abnormal_node",
@@ -23,15 +23,16 @@ def _stub_expensive_parent_nodes(monkeypatch):
     ):
         monkeypatch.setattr(
             f"app.operation_agent.multi_agent.graph.{name}",
-            lambda state: state,
+            _passthrough_node,
         )
     monkeypatch.setattr(
         "app.operation_agent.multi_agent.graph.run_domain_agent",
-        lambda state, _spec: state,
+        _passthrough_agent,
     )
 
 
-def test_supervisor_runs_common_steps_once_and_routes_business_agent(monkeypatch):
+@pytest.mark.anyio
+async def test_supervisor_runs_common_steps_once_and_routes_business_agent(monkeypatch):
     calls = []
     for name in (
         "init_context_node",
@@ -39,16 +40,25 @@ def test_supervisor_runs_common_steps_once_and_routes_business_agent(monkeypatch
         "detect_abnormal_node",
         "summary_node",
     ):
+        async def _record_node(state, _name=name):
+            calls.append(_name)
+            return state
+
         monkeypatch.setattr(
             f"app.operation_agent.multi_agent.graph.{name}",
-            lambda state, _name=name: (calls.append(_name), state)[1],
+            _record_node,
         )
+
+    async def _record_agent(state, spec):
+        calls.append(f"agent:{spec.key}")
+        return state
+
     monkeypatch.setattr(
         "app.operation_agent.multi_agent.graph.run_domain_agent",
-        lambda state, spec: (calls.append(f"agent:{spec.key}"), state)[1],
+        _record_agent,
     )
 
-    result = build_supervisor_graph().invoke({"domain": "business", "errors": []})
+    result = await build_supervisor_graph().ainvoke({"domain": "business", "errors": []})
 
     assert calls.count("init_context_node") == 1
     assert calls.count("query_operation_data_node") == 1
@@ -59,13 +69,14 @@ def test_supervisor_runs_common_steps_once_and_routes_business_agent(monkeypatch
 
 
 @pytest.mark.parametrize("domain", (None, "unknown"))
-def test_supervisor_falls_back_to_safety_and_preserves_routing_error(monkeypatch, domain):
-    _stub_expensive_parent_nodes(monkeypatch)
+@pytest.mark.anyio
+async def test_supervisor_falls_back_to_safety_and_preserves_routing_error(monkeypatch, domain):
+    await _stub_expensive_parent_nodes(monkeypatch)
     state = {"errors": []}
     if domain is not None:
         state["domain"] = domain
 
-    result = build_supervisor_graph().invoke(state)
+    result = await build_supervisor_graph().ainvoke(state)
 
     assert result["supervisor_route"] == "safety"
     assert result["errors"] == [
@@ -76,8 +87,9 @@ def test_supervisor_falls_back_to_safety_and_preserves_routing_error(monkeypatch
     ]
 
 
-def test_supervisor_routes_once_before_dispatching_domain_agent(monkeypatch):
-    _stub_expensive_parent_nodes(monkeypatch)
+@pytest.mark.anyio
+async def test_supervisor_routes_once_before_dispatching_domain_agent(monkeypatch):
+    await _stub_expensive_parent_nodes(monkeypatch)
     route_calls = []
 
     def route_once(state):
@@ -90,7 +102,7 @@ def test_supervisor_routes_once_before_dispatching_domain_agent(monkeypatch):
         route_once,
     )
 
-    result = build_supervisor_graph().invoke({"domain": "business", "errors": []})
+    result = await build_supervisor_graph().ainvoke({"domain": "business", "errors": []})
 
     assert result["supervisor_route"] == "business"
     assert route_calls == ["business"]
@@ -104,6 +116,14 @@ def test_init_context_preserves_existing_errors_and_selected_route():
 
     assert result["errors"] == errors
     assert result["supervisor_route"] == "business"
+
+
+def _passthrough_node(state):
+    return state
+
+
+async def _passthrough_agent(state, _spec):
+    return state
 
 
 def test_operation_graph_compatibility_exports_supervisor_graph():
@@ -126,11 +146,11 @@ def test_supervisor_metadata_retains_the_original_six_node_keys():
 
 
 def _stub_domain_agent_llm(monkeypatch):
-    def fake_reason(state, **_kwargs):
+    async def fake_reason(state, **_kwargs):
         state["reason_analysis"] = "领域原因分析"
         return state
 
-    def fake_advice(state, **_kwargs):
+    async def fake_advice(state, **_kwargs):
         state["advice_items"] = [{"title": "领域建议"}]
         return state
 
@@ -139,12 +159,13 @@ def _stub_domain_agent_llm(monkeypatch):
     agent_graph.build_domain_agent_graph.cache_clear()
 
 
-def test_compiled_supervisor_fallback_is_canonical_for_query_and_summary(monkeypatch):
+@pytest.mark.anyio
+async def test_compiled_supervisor_fallback_is_canonical_for_query_and_summary(monkeypatch):
     """An invalid route must not leave a conflicting page-context domain behind."""
     _stub_domain_agent_llm(monkeypatch)
     queried_domains = []
 
-    def fake_operation_snapshot(state, _errors):
+    async def fake_operation_snapshot(state, _errors):
         queried_domains.append(state["page_context"]["domain"])
         state["raw_data"]["domain"] = state["page_context"]["domain"]
         state["metrics"] = []
@@ -156,7 +177,7 @@ def test_compiled_supervisor_fallback_is_canonical_for_query_and_summary(monkeyp
     )
 
     try:
-        result = build_supervisor_graph().invoke(
+        result = await build_supervisor_graph().ainvoke(
             {
                 "domain": "unsupported",
                 "page_context": {"domain": "business"},

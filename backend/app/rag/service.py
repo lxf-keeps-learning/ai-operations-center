@@ -13,10 +13,11 @@
   3. 未配置真实 RAG 时默认返回空结果；Mock 数据仅在显式开启时使用。
 """
 
+import asyncio
 import logging
 
 from app.config.settings import settings
-from app.observability.langsmith_runs import run_observed
+from app.observability.langsmith_runs import arun_observed, run_observed
 from app.rag.client import RagClient
 from app.rag.schemas import RagSearchRequest, RagSearchResponse
 
@@ -85,6 +86,36 @@ class RagService:
             )
         except Exception as e:
             logger.exception("RAG 检索发生未知异常: %s", e)
+            return RagSearchResponse(
+                success=False,
+                results=[],
+                total=0,
+                error_message=f"RAG 检索未知异常: {e}",
+            )
+
+    async def aretrieve(self, request: RagSearchRequest) -> RagSearchResponse:
+        """异步执行 RAG 检索（Graph 异步节点唯一入口）。
+
+        与 retrieve 同语义：所有可降级异常吞掉返回失败响应；
+        但 asyncio.CancelledError 原样向上传播（不吞取消）。
+        """
+        try:
+            return await arun_observed(
+                "rag_search",
+                "retriever",
+                self._client.asearch(request),
+                inputs={
+                    "query": request.query,
+                    "scene": request.scene,
+                    "top_k": request.top_k,
+                    "filters": request.filters.model_dump(exclude_none=True),
+                },
+                metadata={"rag_operation": "retrieve"},
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.exception("RAG 异步检索发生未知异常: %s", e)
             return RagSearchResponse(
                 success=False,
                 results=[],

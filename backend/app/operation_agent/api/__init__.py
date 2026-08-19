@@ -44,7 +44,7 @@ def _current_user_context() -> dict:
 
 
 @router.post("/operation/analyze", response_model=ApiResponse[OperationAnalyzeResponse])
-def operation_analyze(payload: OperationAnalyzeRequest) -> ApiResponse[OperationAnalyzeResponse]:
+async def operation_analyze(payload: OperationAnalyzeRequest) -> ApiResponse[OperationAnalyzeResponse]:
     """
     执行运营分析并返回结果。
 
@@ -64,7 +64,7 @@ def operation_analyze(payload: OperationAnalyzeRequest) -> ApiResponse[Operation
         evidence        数据来源证据
         errors          处理过程中的错误
     """
-    result = analyze_operation(
+    result = await analyze_operation(
         payload,
         user_context=_current_user_context(),
         trace_id=get_request_context().trace_id,

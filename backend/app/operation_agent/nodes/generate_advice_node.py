@@ -26,7 +26,7 @@ def _load_prompt(name: str) -> str:
     return ""
 
 
-def generate_advice_node(
+async def generate_advice_node(
     state: OperationState,
     *,
     prompt_name: str = "operation_advice.md",
@@ -53,7 +53,7 @@ def generate_advice_node(
     llm_usages: list[dict] = state.get("llm_usages", [])
 
     try:
-        result: LlmResult = llm_client.chat(
+        result: LlmResult = await llm_client.achat(
             prompt_content=system or None,
             user_message=prompt,
             timeout_seconds=settings.operation_llm_timeout_seconds,

@@ -40,12 +40,47 @@ interface SseBlock {
   data: string
 }
 
+const STREAM_OVERALL_TIMEOUT_MS = 125_000
+const STREAM_IDLE_TIMEOUT_MS = 35_000
+
 export function streamReportChatMessage(
   params: { sessionId: string; reportId: number; question: string },
   handlers: StreamHandlers,
 ): ReportChatStreamController {
   const controller = new AbortController()
   const traceId = createTraceId()
+
+  let overallTimer: number | undefined
+  let idleTimer: number | undefined
+  let settled = false
+
+  const clearTimers = () => {
+    if (overallTimer !== undefined) window.clearTimeout(overallTimer)
+    if (idleTimer !== undefined) window.clearTimeout(idleTimer)
+    overallTimer = undefined
+    idleTimer = undefined
+  }
+
+  const fail = (message: string, code: string) => {
+    if (settled) return
+    settled = true
+    clearTimers()
+    controller.abort()
+    const error = new Error(message)
+    ;(error as Error & { code?: string }).code = code
+    handlers.onError(error)
+  }
+
+  const armIdleTimer = () => {
+    if (idleTimer !== undefined) window.clearTimeout(idleTimer)
+    idleTimer = window.setTimeout(() => {
+      fail('事件流空闲超时，已断开连接', 'STREAM_IDLE_TIMEOUT')
+    }, STREAM_IDLE_TIMEOUT_MS)
+  }
+
+  overallTimer = window.setTimeout(() => {
+    fail('回答生成超过时限（125 秒），已停止等待', 'STREAM_TIMEOUT')
+  }, STREAM_OVERALL_TIMEOUT_MS)
 
   fetch(buildApiUrl(`/chat/sessions/${params.sessionId}/messages/stream`), {
     method: 'POST',
@@ -66,13 +101,13 @@ export function streamReportChatMessage(
 
       if (!response.ok) {
         const message = await readErrorMessage(response)
-        handlers.onError(new Error(message))
+        fail(message, 'STREAM_HTTP_ERROR')
         return
       }
 
       const reader = response.body?.getReader()
       if (!reader) {
-        handlers.onError(new Error('流式响应不可读取'))
+        fail('流式响应不可读取', 'STREAM_READ_ERROR')
         return
       }
 
@@ -86,15 +121,17 @@ export function streamReportChatMessage(
         for (const rawBlock of flush ? blocks.filter(Boolean) : blocks) {
           const block = parseSseBlock(rawBlock)
           if (!block) continue
+          armIdleTimer() // 任意业务事件或心跳刷新空闲计时
           try {
             dispatchStreamEvent(block.eventType, JSON.parse(block.data), handlers)
           } catch {
-            handlers.onError(new Error(`无法解析流式回答事件：${block.data.slice(0, 100)}`))
+            fail(`无法解析流式回答事件：${block.data.slice(0, 100)}`, 'STREAM_PARSE_ERROR')
           }
         }
       }
 
       try {
+        armIdleTimer()
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
@@ -103,18 +140,34 @@ export function streamReportChatMessage(
         }
         buffer += decoder.decode()
         if (buffer.trim()) consume(true)
-        handlers.onClose()
+        if (!settled) {
+          settled = true
+          clearTimers()
+          handlers.onClose()
+        }
       } catch (error) {
-        if (isAbortError(error)) return
-        handlers.onError(error instanceof Error ? error : new Error(String(error)))
+        if (isAbortError(error)) {
+          if (!settled) clearTimers() // 用户主动取消：静默收尾
+          return
+        }
+        fail(error instanceof Error ? error.message : String(error), 'STREAM_READ_ERROR')
       }
     })
     .catch((error) => {
-      if (isAbortError(error)) return
-      handlers.onError(error instanceof Error ? error : new Error(String(error)))
+      if (isAbortError(error)) {
+        if (!settled) clearTimers()
+        return
+      }
+      fail(error instanceof Error ? error.message : String(error), 'STREAM_NETWORK_ERROR')
     })
 
-  return { abort: () => controller.abort() }
+  return {
+    abort: () => {
+      settled = true
+      clearTimers()
+      controller.abort()
+    },
+  }
 }
 
 function dispatchStreamEvent(

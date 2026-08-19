@@ -1,6 +1,7 @@
 """Supervisor graph for routing operation reports through domain agents."""
 
-from collections.abc import Callable
+import inspect
+from collections.abc import Awaitable, Callable
 
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
@@ -17,8 +18,7 @@ from app.operation_agent.nodes.query_operation_data_node import query_operation_
 from app.operation_agent.nodes.summary_node import summary_node
 from app.operation_agent.state import OperationDomain, OperationState
 
-
-OperationNode = Callable[[OperationState], OperationState]
+OperationNode = Callable[[OperationState], OperationState | Awaitable[OperationState]]
 
 
 def _route_supervisor_node(state: OperationState) -> OperationState:
@@ -28,11 +28,11 @@ def _route_supervisor_node(state: OperationState) -> OperationState:
     return state
 
 
-def _dispatch_domain_agent_node(state: OperationState) -> OperationState:
+async def _dispatch_domain_agent_node(state: OperationState) -> OperationState:
     """Run the configured domain agent for the Supervisor-selected route."""
 
     spec = DOMAIN_AGENT_SPECS[state["supervisor_route"]]
-    return run_domain_agent(state, spec)
+    return await run_domain_agent(state, spec)
 
 
 # This contract preserves the former six metadata keys while adding the new
@@ -112,7 +112,26 @@ def _with_stream_events(
     node_name: str,
     node_func: OperationNode,
 ) -> OperationNode:
-    """Emit the established custom ``node_started`` event before a parent node."""
+    """Emit the established custom ``node_started`` event before a node.
+
+    保持与 node_func 相同的异步性：async 节点在事件循环内执行，
+    取消才能穿透到 Node 内部 await（Tool / LLM / RAG）。
+    """
+
+    if inspect.iscoroutinefunction(node_func):
+        async def wrapped_async(state: OperationState) -> OperationState:
+            try:
+                writer = get_stream_writer()
+                writer({
+                    "kind": "node_started",
+                    "node_key": node_key,
+                    "node_name": node_name,
+                })
+            except RuntimeError:
+                pass
+            return await node_func(state)
+
+        return wrapped_async
 
     def wrapped(state: OperationState) -> OperationState:
         try:

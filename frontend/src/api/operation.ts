@@ -43,6 +43,6 @@ export async function analyzeOperation(params: OperationAnalyzeParams) {
   return request<OperationResult>('/operation/analyze', {
     method: 'POST',
     body: JSON.stringify(params),
-    timeout: 120_000,
+    timeout: 125_000,
   })
 }

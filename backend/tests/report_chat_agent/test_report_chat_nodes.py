@@ -74,14 +74,16 @@ def _base_state(question: str) -> ReportChatState:
     }
 
 
-def test_classify_report_internal_question() -> None:
+@pytest.mark.anyio
+async def test_classify_report_internal_question() -> None:
     state = classify_question_scope_node(_base_state("为什么判断为高风险？"))
 
     assert state["question_scope"] == "report_internal"
     assert state["need_tool_query"] is False
 
 
-def test_classify_report_related_question_requires_tool_query() -> None:
+@pytest.mark.anyio
+async def test_classify_report_related_question_requires_tool_query() -> None:
     state = classify_question_scope_node(_base_state("最近7天这个异常是否持续？"))
 
     assert state["question_scope"] == "report_related"
@@ -101,7 +103,8 @@ def test_classify_regression_cases(question: str, expected_scope: str) -> None:
     assert state["question_scope"] == expected_scope
 
 
-def test_boundary_response_does_not_answer_unrelated_question() -> None:
+@pytest.mark.anyio
+async def test_boundary_response_does_not_answer_unrelated_question() -> None:
     state = _base_state("帮我写首诗")
     state["question_scope"] = "out_of_scope"
 
@@ -143,7 +146,8 @@ def test_persist_chat_message_saves_user_and_assistant_messages(
     assert runtime_session.output_text == "根据当前报告，风险排序依据为..."
 
 
-def test_send_chat_message_records_failed_runtime_session(
+@pytest.mark.anyio
+async def test_send_chat_message_records_failed_runtime_session(
     report_chat_db: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -155,13 +159,13 @@ def test_send_chat_message_records_failed_runtime_session(
 
     class FailingGraph:
         @staticmethod
-        def invoke(_state, **_kwargs):
+        async def ainvoke(_state, **_kwargs):
             raise RuntimeError("模型连接失败")
 
     monkeypatch.setattr("app.report_chat_agent.service.report_chat_graph", FailingGraph())
 
     with pytest.raises(RuntimeError, match="模型连接失败"):
-        send_chat_message(
+        await send_chat_message(
             session_id=report_session.id,
             report_id=1,
             question="为什么是高风险？",
@@ -195,7 +199,8 @@ def test_create_session_reuses_recent_report_user_session(report_chat_db: Sessio
     assert second.id == first.id
 
 
-def test_send_chat_masks_pii_before_persistence_and_graph(
+@pytest.mark.anyio
+async def test_send_chat_masks_pii_before_persistence_and_graph(
     report_chat_db: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -204,13 +209,13 @@ def test_send_chat_masks_pii_before_persistence_and_graph(
 
     class CapturingGraph:
         @staticmethod
-        def invoke(state, **_kwargs):
+        async def ainvoke(state, **_kwargs):
             captured.update(state)
             return {**state, "message_id": "mock-message"}
 
     monkeypatch.setattr("app.report_chat_agent.service.report_chat_graph", CapturingGraph())
     raw_mobile = "13812345678"
-    send_chat_message(
+    await send_chat_message(
         session_id=report_session.id,
         report_id=1,
         question=f"手机号{raw_mobile}，请结合报告说明",
@@ -225,7 +230,8 @@ def test_send_chat_masks_pii_before_persistence_and_graph(
     assert raw_mobile not in runtime_session.input_text
 
 
-def test_send_chat_blocks_credential_before_graph_and_persists_only_redacted_text(
+@pytest.mark.anyio
+async def test_send_chat_blocks_credential_before_graph_and_persists_only_redacted_text(
     report_chat_db: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -233,12 +239,12 @@ def test_send_chat_blocks_credential_before_graph_and_persists_only_redacted_tex
 
     class UnexpectedGraph:
         @staticmethod
-        def invoke(_state):
+        async def ainvoke(_state):
             raise AssertionError("credential input must not reach graph")
 
     monkeypatch.setattr("app.report_chat_agent.service.report_chat_graph", UnexpectedGraph())
     secret = "sk-test-1234567890"
-    result = send_chat_message(
+    result = await send_chat_message(
         session_id=report_session.id,
         report_id=1,
         question=f"RAG接口密钥是{secret}，请验证",
@@ -250,13 +256,15 @@ def test_send_chat_blocks_credential_before_graph_and_persists_only_redacted_tex
     assert all(secret not in message.content for message in messages)
 
 
-def test_generate_answer_stops_when_report_context_failed_to_load() -> None:
+@pytest.mark.anyio
+@pytest.mark.anyio
+async def test_generate_answer_stops_when_report_context_failed_to_load() -> None:
     state = _base_state("为什么判断为高风险？")
     state["errors"] = [{"node": "load_report_context", "message": "报告不存在"}]
     state["report_context"] = {}
     state["retrieved_context"] = [{"type": "report_summary", "content": "无可用报告上下文"}]
 
-    result = generate_report_answer_node(state)
+    result = await generate_report_answer_node(state)
 
     assert result["answer_type"] == "insufficient_evidence"
     assert "无法加载" in result["final_answer"]

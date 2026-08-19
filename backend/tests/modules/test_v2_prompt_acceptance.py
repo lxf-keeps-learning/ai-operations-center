@@ -371,7 +371,8 @@ def test_release_rejects_a_version_owned_by_another_prompt() -> None:
             )
 
 
-def test_operation_reason_node_uses_managed_prompt_and_records_version(
+@pytest.mark.anyio
+async def test_operation_reason_node_uses_managed_prompt_and_records_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     managed = PromptRenderResult(
@@ -396,7 +397,7 @@ def test_operation_reason_node_uses_managed_prompt_and_records_version(
 
     captured: dict[str, str | None] = {}
 
-    def fake_chat(**kwargs) -> LlmResult:
+    async def fake_chat(**kwargs) -> LlmResult:
         captured["system"] = kwargs.get("prompt_content")
         captured["user"] = kwargs.get("user_message")
         return LlmResult(
@@ -409,7 +410,7 @@ def test_operation_reason_node_uses_managed_prompt_and_records_version(
             success=True,
         )
 
-    monkeypatch.setattr(analyze_reason_module.llm_client, "chat", fake_chat)
+    monkeypatch.setattr(analyze_reason_module.llm_client, "achat", fake_chat)
     state = {
         "metrics": [{"metric_name": "高等级告警", "value": 2}],
         "abnormal_items": [{"type": "high_level_alarm", "severity": "high"}],
@@ -420,7 +421,7 @@ def test_operation_reason_node_uses_managed_prompt_and_records_version(
         "llm_usages": [],
     }
 
-    result = analyze_reason_module.analyze_reason_node(state)
+    result = await analyze_reason_module.analyze_reason_node(state)
 
     assert captured == {"system": "managed-system", "user": "managed-user"}
     assert result["prompt_facts"]["analyze_reason"] == {
@@ -431,7 +432,8 @@ def test_operation_reason_node_uses_managed_prompt_and_records_version(
     }
 
 
-def test_operation_graph_trace_receives_prompt_metadata(
+@pytest.mark.anyio
+async def test_operation_graph_trace_receives_prompt_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     prompt_metadata = {
@@ -454,14 +456,17 @@ def test_operation_graph_trace_receives_prompt_metadata(
         return {}
 
     monkeypatch.setattr(operation_service, "build_langsmith_config", fake_config)
-    monkeypatch.setattr(
-        operation_service.operation_graph,
-        "invoke",
-        lambda state, config: {
+    async def fake_ainvoke(state, config=None, **_kwargs):
+        return {
             **state,
             "final_answer": "ok",
             "errors": [],
-        },
+        }
+
+    monkeypatch.setattr(
+        operation_service.operation_graph,
+        "ainvoke",
+        fake_ainvoke,
     )
     monkeypatch.setattr(
         operation_service,
@@ -469,7 +474,7 @@ def test_operation_graph_trace_receives_prompt_metadata(
         lambda *_args, **_kwargs: SimpleNamespace(id=1),
     )
 
-    operation_service.analyze_operation(
+    await operation_service.analyze_operation(
         OperationAnalyzeRequest(force_refresh=True),
         user_context={"user_id": "acceptance-user"},
         trace_id="trace-v2-metadata",

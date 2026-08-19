@@ -3,7 +3,7 @@
 import json
 from types import SimpleNamespace
 
-import anyio
+import pytest
 
 from app.analysis_stream.event_emitter import SseEventEmitter
 from app.operation_agent import service, stream_service
@@ -32,7 +32,7 @@ class _RecordingSyncGraph:
     def __init__(self) -> None:
         self.config: dict | None = None
 
-    def invoke(self, _state, *, config):
+    async def ainvoke(self, _state, *, config):
         self.config = config
         return {
             "trace_id": "trace_sync_metadata",
@@ -50,7 +50,8 @@ def _capture_langsmith_config(captured: list[dict]):
     return build_config
 
 
-def test_supervisor_route_is_in_sync_and_stream_langsmith_metadata(
+@pytest.mark.anyio
+async def test_supervisor_route_is_in_sync_and_stream_langsmith_metadata(
     monkeypatch,
 ) -> None:
     request = OperationAnalyzeRequest(
@@ -90,14 +91,12 @@ def test_supervisor_route_is_in_sync_and_stream_langsmith_metadata(
 
     stream_events: list[dict] = []
 
-    async def collect_stream() -> None:
-        emitter = SseEventEmitter(run_id="trace_stream_metadata")
-        async for event in stream_service.stream_operation_analysis(request, emitter):
-            data_line = next(line for line in event.splitlines() if line.startswith("data: "))
-            stream_events.append(json.loads(data_line.removeprefix("data: ")))
+    emitter = SseEventEmitter(run_id="trace_stream_metadata")
+    async for event in stream_service.stream_operation_analysis(request, emitter):
+        data_line = next(line for line in event.splitlines() if line.startswith("data: "))
+        stream_events.append(json.loads(data_line.removeprefix("data: ")))
 
-    anyio.run(collect_stream)
-    service.analyze_operation(request)
+    await service.analyze_operation(request)
 
     assert stream_graph.config is not None
     assert sync_graph.config is not None

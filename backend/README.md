@@ -442,6 +442,31 @@ docker compose up -d mysql
 
 真实数据会保存在 Docker volume `mysql_data` 中，不提交到 Git。
 
+## 超时与取消策略（绝对 Deadline + 全链路异步取消）
+
+所有耗时操作（Tool / LLM / RAG / Graph / SSE）统一受"绝对 Deadline + 异步取消"约束：
+
+| 环节 | 配置项 | 默认值 |
+|---|---|---|
+| Query 工具 | `TOOL_QUERY_TIMEOUT_SECONDS` | 15s |
+| 写操作工具 | `TOOL_WRITE_TIMEOUT_SECONDS` | 30s（超时后标记 `result_unknown`，不自动重试） |
+| LLM 调用（含流式） | `LLM_TIMEOUT_SECONDS` / `OPERATION_LLM_TIMEOUT_SECONDS` | 60s |
+| 报告生成总预算 | `REPORT_GENERATION_TIMEOUT_SECONDS` | 120s |
+| 报告 Graph 预算 | `REPORT_GRAPH_TIMEOUT_SECONDS` | 115s |
+| SSE 空闲超时 | `SSE_IDLE_TIMEOUT_SECONDS` | 30s |
+| SSE 心跳间隔 | `SSE_HEARTBEAT_INTERVAL_SECONDS` | 15s |
+| 超时清理预留 | `TIMEOUT_CLEANUP_RESERVE_SECONDS` | 5s |
+
+关键语义：
+
+- 预算沿 `请求 → Graph → Node → Tool → LLM` 传播，子层只能取 `min(自身默认, 剩余总预算)`，不会每层重新获得完整预算。
+- 超时 = 取消 asyncio Task 并穿透到 async Node / Tool / LLM / RAG 协程（原生异步客户端，不使用线程池伪装取消）。
+- `asyncio.CancelledError`（用户主动取消）与 Deadline 超时（`TimeoutError`）严格区分，前者不被吞掉。
+- Graph 超时后 best-effort 写入失败状态（不保存成功报告），依次发送 `analysis_failed(REPORT_TIMEOUT)` / `message_failed` + `stream_closed`，终止事件只发一次。
+- SSE 心跳事件不持久化；客户端断连即取消对应 Graph Task。
+- 错误码：LLM 超时 `504101`、报告超时 `504102`、SSE 空闲超时 `504103`。
+- 前端兜底：非流式请求 125s；流式整体 125s + 空闲 35s（收到任意业务事件或心跳刷新），超时后 `AbortController.abort()`。
+
 ## 验证命令
 
 ```bash

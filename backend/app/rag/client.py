@@ -12,6 +12,7 @@
 调用风格与 app/runtime/llm/client.py 一致，使用 httpx.Client 同步调用。
 """
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -19,9 +20,16 @@ from typing import Any
 import httpx
 
 from app.config.settings import settings
+from app.core.timeout import child_timeout, current_deadline
 from app.rag.schemas import RagSearchRequest, RagSearchResponse
 
 logger = logging.getLogger(__name__)
+
+
+def _deadline_expired() -> bool:
+    """当前上下文的 Deadline 是否已过期（区分 Deadline 取消与用户主动取消）。"""
+    current = current_deadline()
+    return current is not None and current.expired
 
 
 class RagClient:
@@ -119,6 +127,83 @@ class RagClient:
                 total=0,
                 error_message=f"RAG HTTP 请求异常: {e}",
             )
+
+        if resp.status_code != 200:
+            detail = resp.text[:500]
+            logger.warning("RAG 服务返回非 200 (status=%s, url=%s): %s", resp.status_code, url, detail)
+            return RagSearchResponse(
+                success=False,
+                results=[],
+                total=0,
+                error_message=f"RAG 服务返回 HTTP {resp.status_code}: {detail}",
+            )
+
+        return self._parse_response(resp, url)
+
+    async def asearch(self, request: RagSearchRequest) -> RagSearchResponse:
+        """异步调用外部 RAG 检索服务（可取消）。
+
+        使用 httpx.AsyncClient；超时取 min(rag_search_timeout_seconds, Deadline 剩余预算)。
+        取消（CancelledError）原样向上传播，AsyncClient 上下文管理器负责关闭连接。
+        """
+        if not self.base_url:
+            logger.info("RAG_SEARCH_URL 未配置，跳过 RAG 检索，返回空结果。")
+            return RagSearchResponse(success=True, results=[], total=0)
+
+        url = f"{self.base_url}/api/rag/search"
+        headers = self._build_headers()
+        payload = self._build_payload(request)
+        budget = child_timeout(self.timeout_seconds)
+
+        try:
+            transport = getattr(self, "_transport", None)
+            async with httpx.AsyncClient(timeout=budget, transport=transport) as http:
+                try:
+                    async with asyncio.timeout(budget):
+                        resp = await http.post(url, headers=headers, json=payload)
+                except TimeoutError:
+                    logger.warning("RAG 检索超时 (timeout=%ss, url=%s)", self.timeout_seconds, url)
+                    return RagSearchResponse(
+                        success=False,
+                        results=[],
+                        total=0,
+                        error_message=f"RAG 检索超时 (timeout={self.timeout_seconds}s)",
+                    )
+        except httpx.TimeoutException:
+            logger.warning("RAG 检索超时 (timeout=%ss, url=%s)", self.timeout_seconds, url)
+            return RagSearchResponse(
+                success=False,
+                results=[],
+                total=0,
+                error_message=f"RAG 检索超时 (timeout={self.timeout_seconds}s)",
+            )
+        except httpx.ConnectError as e:
+            logger.warning("RAG 服务连接失败 (url=%s): %s", url, e)
+            return RagSearchResponse(
+                success=False,
+                results=[],
+                total=0,
+                error_message=f"RAG 服务连接失败: {e}",
+            )
+        except httpx.HTTPError as e:
+            logger.warning("RAG HTTP 请求异常 (url=%s): %s", url, e)
+            return RagSearchResponse(
+                success=False,
+                results=[],
+                total=0,
+                error_message=f"RAG HTTP 请求异常: {e}",
+            )
+        except asyncio.CancelledError:
+            # 用户主动取消原样传播；外层 Deadline 到期导致的取消按超时降级。
+            if _deadline_expired():
+                logger.warning("RAG 检索超时 (timeout=%ss, url=%s)", self.timeout_seconds, url)
+                return RagSearchResponse(
+                    success=False,
+                    results=[],
+                    total=0,
+                    error_message=f"RAG 检索超时 (timeout={self.timeout_seconds}s)",
+                )
+            raise
 
         if resp.status_code != 200:
             detail = resp.text[:500]

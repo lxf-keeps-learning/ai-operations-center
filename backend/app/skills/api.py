@@ -36,7 +36,7 @@ def get_skill(skill_id: str) -> ApiResponse[SkillDefinition]:
     "/skills/{skill_id}/execute",
     response_model=ApiResponse[SkillExecutionResult],
 )
-def run_skill(
+async def run_skill(
     skill_id: str,
     payload: SkillExecutionRequest,
 ) -> ApiResponse[SkillExecutionResult]:
@@ -54,7 +54,7 @@ def run_skill(
         permissions=list(user_context.permissions),
     )
     try:
-        result = execute_skill(definition, payload.inputs, context)
+        result = await execute_skill(definition, payload.inputs, context)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
     except ValueError as exc:

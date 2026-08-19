@@ -2,16 +2,19 @@
 Operation Stream Service — 运营分析流式执行入口。
 
 执行流程（重构后）：
-  compiled_graph.astream()
-  → LangGraph StreamPart (mode, data)
-  → LangGraphEventAdapter
-  → AnalysisStreamEvent
-  → SSE 字符串 → API StreamingResponse
+  SsePump（整体期限 120s / Graph 115s / 空闲心跳 15s / 断连取消）
+    → producer: compiled_graph.astream()
+    → LangGraphEventAdapter
+    → AnalysisStreamEvent
+    → SSE 字符串 → API StreamingResponse
 
-核心变更：
-  - 不再手动调用业务 Node，执行权完全交给 compiled graph。
-  - LangGraphEventAdapter 负责事件转换，Service 不感知 LangGraph 内部协议。
-  - Graph 的 Edge/ConditionalEdge 决定真实执行路径。
+防卡死语义：
+  - Graph 预算 report_graph_timeout_seconds 到期 → pump 取消 producer Task，
+    Graph/Node/Tool/LLM 协程全部收到取消；best-effort 写入失败状态，
+    依次发送 analysis_failed(REPORT_TIMEOUT) + stream_closed，且只发一次。
+  - 空闲心跳 sse_heartbeat_interval_seconds 维持连接；客户端断连 → generator
+    aclose → pump 取消 producer，资源清理。
+  - 心跳事件不持久化（非业务事件）。
 """
 
 import logging
@@ -21,6 +24,8 @@ from typing import Any, AsyncGenerator
 from app.analysis_stream.event_emitter import SseEventEmitter
 from app.analysis_stream.langgraph_event_adapter import LangGraphEventAdapter
 from app.analysis_stream.schemas import AnalysisStreamEvent
+from app.analysis_stream.sse_pump import SsePump
+from app.config.settings import settings
 from app.db.session import get_session_local
 from app.modules.prompt_center.application.langgraph_integration import get_prompt_metadata
 from app.observability import build_langsmith_config
@@ -36,6 +41,7 @@ from app.operation_agent.services.record_service import save_analysis_result
 from app.operation_agent.state import OperationState
 from app.security.content_moderator import ModerationAction, content_moderator
 from app.utils.ids import new_trace_id
+from app.utils.sse import to_sse
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +69,7 @@ async def stream_operation_analysis(
     emitter: SseEventEmitter,
     user_context: dict | None = None,
 ) -> AsyncGenerator[str, None]:
-    """流式执行运营分析，由 compiled graph 驱动节点执行顺序。"""
+    """流式执行运营分析，由 SsePump 驱动 compiled graph 并防卡死。"""
     moderation = content_moderator.moderate(request.user_question) if request.user_question else None
     safe_user_question = (
         getattr(moderation, "masked_text", None) or request.user_question
@@ -91,8 +97,6 @@ async def stream_operation_analysis(
         "_streaming": True,
     }
 
-    overall_start = time.monotonic()
-
     # ── analysis_started ──────────────────────────────────
     yield _emit_event(
         initial_state,
@@ -115,6 +119,43 @@ async def stream_operation_analysis(
         )
         yield _emit_event(initial_state, emitter, emitter.create_stream_closed())
         return
+
+    pump = SsePump(
+        lambda: _analysis_producer(
+            initial_state,
+            emitter,
+            request,
+            user_context or {},
+        ),
+        graph_timeout_seconds=settings.report_graph_timeout_seconds,
+        overall_timeout_seconds=settings.report_generation_timeout_seconds,
+        idle_timeout_seconds=settings.sse_idle_timeout_seconds,
+        heartbeat_interval_seconds=settings.sse_heartbeat_interval_seconds,
+        heartbeat_sse=to_sse("heartbeat", {"trace_id": emitter.run_id}),
+        on_graph_timeout=lambda: _analysis_timeout_events(
+            initial_state,
+            emitter,
+            page_context,
+            user_context or {},
+        ),
+        on_failure=lambda exc: _analysis_failure_events(
+            emitter,
+            error_code="ANALYSIS_STREAM_FAILED",
+            error_message=str(exc),
+        ),
+    )
+    async for event in pump.run():
+        yield event
+
+
+async def _analysis_producer(
+    initial_state: OperationState,
+    emitter: SseEventEmitter,
+    request: OperationAnalyzeRequest,
+    user_context: dict,
+) -> AsyncGenerator[str, None]:
+    """Graph astream 事件生产者：输出业务事件并负责正常终止事件。"""
+    overall_start = time.monotonic()
 
     adapter = LangGraphEventAdapter(
         emitter,
@@ -216,7 +257,7 @@ async def stream_operation_analysis(
         saved = save_analysis_result(
             db,
             trace_id=trace_id,
-            page_context=page_context,
+            page_context=initial_state.get("page_context", {}),
             input_snapshot={
                 "message": initial_state.get("user_question", ""),
                 "raw_data": final_state.get("raw_data", {}),
@@ -262,6 +303,78 @@ async def stream_operation_analysis(
 
     # ── stream_closed ───────────────────────────────────
     yield _emit_event(final_state, emitter, emitter.create_stream_closed())
+
+
+def _analysis_timeout_events(
+    initial_state: OperationState,
+    emitter: SseEventEmitter,
+    page_context: dict,
+    user_context: dict,
+) -> list[str]:
+    """Graph 超时：best-effort 写失败状态 + 发送终止事件（只发一次）。"""
+    logger.warning("运营分析 Graph 超时，取消任务并写入失败状态: trace_id=%s", emitter.run_id)
+    db = None
+    try:
+        db = get_session_local()()
+        save_analysis_result(
+            db,
+            trace_id=emitter.run_id,
+            page_context=page_context,
+            input_snapshot={"message": page_context.get("user_question", "")},
+            result={
+                "trace_id": emitter.run_id,
+                "raw_data": {},
+                "metrics": [],
+                "abnormal_items": [],
+                "reason_analysis": "",
+                "risk_items": [],
+                "advice_items": [],
+                "evidence": [],
+                "analysis_basis": {},
+                "final_answer": "",
+                "llm_usages": [],
+                "errors": [{"node": "report_generation", "message": "报告生成超时"}],
+            },
+            status="failed",
+            error_message="报告生成超时",
+            user_context=user_context,
+        )
+    except Exception:
+        logger.exception("写入运营分析失败状态异常（不影响超时收尾）")
+    finally:
+        if db is not None:
+            db.close()
+
+    events = [
+        _emit_event(
+            initial_state,
+            emitter,
+            emitter.create_analysis_failed(
+                message="分析任务超时",
+                error_code="REPORT_TIMEOUT",
+                error_message="报告生成超过时限，已停止分析",
+            ),
+        ),
+        _emit_event(initial_state, emitter, emitter.create_stream_closed()),
+    ]
+    return events
+
+
+def _analysis_failure_events(
+    emitter: SseEventEmitter,
+    *,
+    error_code: str,
+    error_message: str,
+) -> list[str]:
+    """producer 异常兜底：失败 + 关闭（只发一次）。"""
+    return [
+        emitter.emit_analysis_failed(
+            message="分析任务执行失败",
+            error_code=error_code,
+            error_message=error_message,
+        ),
+        emitter.emit_stream_closed(),
+    ]
 
 
 def _persist_event(state: OperationState, event: AnalysisStreamEvent) -> None:

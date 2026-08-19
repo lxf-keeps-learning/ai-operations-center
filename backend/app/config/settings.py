@@ -55,8 +55,51 @@ class Settings(BaseSettings):
         description="发送到 LangSmith 前是否递归脱敏输入和输出。",
     )
     operation_llm_timeout_seconds: float = Field(
-        default=20.0,
-        description="Operation Agent 调用 DeepSeek 生成报告片段的单次超时时间。",
+        default=60.0,
+        gt=0,
+        description="Operation Agent 调用 LLM 生成报告片段的单次超时时间（已对齐 llm_timeout_seconds 默认 60s）。",
+    )
+
+    # ── 超时与取消策略（绝对 Deadline + 全链路异步取消） ──────────────────
+    tool_query_timeout_seconds: float = Field(
+        default=15.0,
+        gt=0,
+        description="Query 工具单次执行默认超时（秒）。",
+    )
+    tool_write_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        description="写操作（action）工具单次执行默认超时（秒）；超时后结果状态标记 result_unknown。",
+    )
+    llm_timeout_seconds: float = Field(
+        default=60.0,
+        gt=0,
+        description="LLM 单次调用统一默认超时（秒），流式与非流式均受此约束。",
+    )
+    report_generation_timeout_seconds: float = Field(
+        default=120.0,
+        gt=0,
+        description="报告生成外部总预算（秒），含失败持久化、审计、SSE 终止事件与资源清理。",
+    )
+    report_graph_timeout_seconds: float = Field(
+        default=115.0,
+        gt=0,
+        description="报告 Graph 执行预算（秒），须小于 report_generation_timeout_seconds。",
+    )
+    sse_idle_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        description="SSE 连续无业务事件或心跳的空闲超时（秒），触发后终止事件流。",
+    )
+    sse_heartbeat_interval_seconds: float = Field(
+        default=15.0,
+        gt=0,
+        description="SSE 心跳发送间隔（秒），须小于 sse_idle_timeout_seconds。",
+    )
+    timeout_cleanup_reserve_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        description="Graph 超时后预留的清理时间（秒），用于失败状态持久化与终止事件。",
     )
     rag_search_url: str = Field(
         default="",

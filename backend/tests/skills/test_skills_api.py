@@ -44,7 +44,7 @@ async def test_get_missing_skill_returns_unified_404() -> None:
 
 @pytest.mark.anyio
 async def test_execute_skill_uses_unified_endpoint(monkeypatch) -> None:
-    def fake_execute(definition, inputs, context):
+    async def fake_execute(definition, inputs, context):
         assert inputs == {"domain": "safety"}
         return SkillExecutionResult(
             skill_id=definition.id,

@@ -1,9 +1,12 @@
+import asyncio
 import logging
 
+from app.config.settings import settings
+from app.core.timeout import ReportTimeoutError
 from app.db.session import get_session_local
 from app.observability import build_langsmith_config
 from app.report_chat_agent.graph import report_chat_graph
-from app.report_chat_agent.persistence import prepare_sync_report_chat_graph
+from app.report_chat_agent.persistence import async_report_chat_graph
 from app.report_chat_agent.repositories import report_chat_repo
 from app.report_chat_agent.state import ReportChatState
 from app.security.content_moderator import ModerationAction, content_moderator
@@ -100,13 +103,18 @@ def _enqueue_completed_turn_for_review(result: ReportChatState, report_id: int) 
         db.close()
 
 
-def send_chat_message(
+async def send_chat_message(
     session_id: str,
     report_id: int,
     question: str,
     user_id: str = "anonymous",
     trace_id: str | None = None,
 ) -> ReportChatState:
+    """同步执行一次报告问答（受 report_graph_timeout_seconds 约束）。
+
+    超时语义：Graph Task 被取消，best-effort 写入失败状态（fail_turn），
+    抛出 ReportTimeoutError（HTTP 504 / 504102），不保存成功报告。
+    """
     current_trace_id = trace_id or new_trace_id()
     db = get_session_local()()
     try:
@@ -197,24 +205,34 @@ def send_chat_message(
         return initial_state
 
     try:
-        graph = prepare_sync_report_chat_graph(report_chat_graph)
-        graph_config = build_langsmith_config(
-            trace_id=current_trace_id,
-            graph_name="ioc_report_chat_graph",
-            user_id=user_id,
-            session_id=session_id,
-            conversation_id=session.conversation_id,
-            metadata={
-                "report_id": str(report_id),
-                "scene": initial_state["scene"],
-                "streaming": False,
-            },
-        )
-        graph_config["configurable"] = {"thread_id": session_id}
-        result = graph.invoke(
-            initial_state,
-            config=graph_config,
-        )
+        async with async_report_chat_graph(report_chat_graph) as graph:
+            graph_config = build_langsmith_config(
+                trace_id=current_trace_id,
+                graph_name="ioc_report_chat_graph",
+                user_id=user_id,
+                session_id=session_id,
+                conversation_id=session.conversation_id,
+                metadata={
+                    "report_id": str(report_id),
+                    "scene": initial_state["scene"],
+                    "streaming": False,
+                },
+            )
+            graph_config["configurable"] = {"thread_id": session_id}
+            try:
+                async with asyncio.timeout(settings.report_graph_timeout_seconds):
+                    result = await graph.ainvoke(
+                        initial_state,
+                        config=graph_config,
+                    )
+            except TimeoutError as exc:
+                _fail_turn_best_effort(
+                    runtime_session_id=runtime_session_id,
+                    error_message="报告生成超时",
+                )
+                raise ReportTimeoutError(detail={"trace_id": current_trace_id}) from exc
+    except ReportTimeoutError:
+        raise
     except Exception as exc:
         failed_db = get_session_local()()
         try:
@@ -242,3 +260,18 @@ def send_chat_message(
     _enqueue_completed_turn_for_review(result, report_id)
     save_report_chat_usage(result)
     return result
+
+
+def _fail_turn_best_effort(*, runtime_session_id: str, error_message: str) -> None:
+    """超时后的 best-effort 失败状态持久化。"""
+    db = get_session_local()()
+    try:
+        report_chat_repo.fail_turn(
+            db,
+            runtime_session_id=runtime_session_id,
+            error_message=error_message,
+        )
+    except Exception:
+        logger.exception("报告问答超时写失败状态异常（不影响超时返回）")
+    finally:
+        db.close()

@@ -28,12 +28,13 @@ class ToolException(AppException):
         retryable: bool = False,
     ):
         self.detail = detail or {}
-        self.retryable = retryable
         # 先调用 AppException.__init__ 保证继承链完整，
         # 再覆盖 code 为字符串类型（Tool 领域使用字符串错误码，与 HTTP 整数错误码分离）
         super().__init__(code=0, message=message, http_status=500, data=None)
         self.code = code
         self.message = message
+        # AppException.__init__ 会写入默认 retryable，这里必须最后覆盖。
+        self.retryable = retryable
 
 
 class ToolNotFoundError(ToolException):
@@ -61,14 +62,38 @@ class ToolValidationError(ToolException):
 
 
 class ToolTimeoutError(ToolException):
-    """Tool 执行超时（可重试）。"""
+    """Tool 执行超时（仅安全查询可重试）。"""
 
-    def __init__(self, message: str = "Tool execution timeout", detail: dict | None = None):
+    def __init__(
+        self,
+        message: str = "Tool execution timeout",
+        detail: dict | None = None,
+        retryable: bool = True,
+    ):
         super().__init__(
             code="TOOL_TIMEOUT",
             message=message,
             detail=detail,
-            retryable=True,
+            retryable=retryable,
+        )
+
+
+class WriteResultUnknownError(ToolException):
+    """写操作超时后无法确认下游是否提交，结果状态为 result_unknown。
+
+    不得自动重试；必须通过查询接口或补偿任务确认最终状态。
+    """
+
+    def __init__(
+        self,
+        message: str = "写操作超时，无法确认下游是否提交",
+        detail: dict | None = None,
+    ):
+        super().__init__(
+            code="WRITE_RESULT_UNKNOWN",
+            message=message,
+            detail=detail,
+            retryable=False,
         )
 
 

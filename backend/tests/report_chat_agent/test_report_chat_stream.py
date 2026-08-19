@@ -1,3 +1,4 @@
+import pytest
 """Report Chat 真实回答流测试。"""
 
 import json
@@ -194,7 +195,8 @@ def test_blocked_input_still_completes_stream(monkeypatch) -> None:
     assert events[-2]["answer_type"] == "boundary"
 
 
-def test_llm_client_stream_chat_forwards_model_chunks() -> None:
+@pytest.mark.anyio
+async def test_llm_client_stream_chat_forwards_model_chunks() -> None:
     class FakeStreamingModel:
         def stream(self, messages, **kwargs):
             assert messages[-1].content == "用户问题"

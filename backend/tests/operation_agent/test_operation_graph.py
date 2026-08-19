@@ -47,76 +47,88 @@ def test_operation_cache_key_distinguishes_tab_and_question() -> None:
     assert build_cache_key(base) != build_cache_key(question_changed)
 
 
+def _fake_chat_result(user_message: str, prompt_content: str | None) -> LlmResult:
+    if "请只输出 JSON 数组" in user_message:
+        content = json.dumps(
+            [
+                {
+                    "title": "闭环高等级运营风险",
+                    "priority": "P1",
+                    "owner_role": "安全运营负责人",
+                    "action": "核查高等级告警、待整改隐患和待处理工单，明确责任人与完成时间。",
+                    "expected_result": "高等级风险进入闭环处置。",
+                    "evidence": [],
+                }
+            ],
+            ensure_ascii=False,
+        )
+    else:
+        content = "当前风险主要来自高等级未闭环告警、待整改隐患和待处理工单。"
+    return LlmResult(
+        content=content,
+        model="deepseek-chat",
+        prompt_tokens=8,
+        completion_tokens=6,
+        total_tokens=14,
+        cost_ms=5,
+        success=True,
+        system_prompt=prompt_content or "",
+    )
+
+
 @pytest.fixture
 def fake_operation_llm(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_chat(
+    async def fake_achat(
         prompt_content: str | None,
         user_message: str,
         history: list[dict[str, str]] | None = None,
         timeout_seconds: float | None = None,
+        provider_name: str | None = None,
     ) -> LlmResult:
         assert timeout_seconds == settings.operation_llm_timeout_seconds
-        if "请只输出 JSON 数组" in user_message:
-            content = json.dumps(
-                [
-                    {
-                        "title": "闭环高等级运营风险",
-                        "priority": "P1",
-                        "owner_role": "安全运营负责人",
-                        "action": "核查高等级告警、待整改隐患和待处理工单，明确责任人与完成时间。",
-                        "expected_result": "高等级风险进入闭环处置。",
-                        "evidence": [],
-                    }
-                ],
-                ensure_ascii=False,
-            )
-        else:
-            content = "当前风险主要来自高等级未闭环告警、待整改隐患和待处理工单。"
-        return LlmResult(
-            content=content,
-            model="deepseek-chat",
-            prompt_tokens=8,
-            completion_tokens=6,
-            total_tokens=14,
-            cost_ms=5,
-            success=True,
-            system_prompt=prompt_content or "",
-        )
+        return _fake_chat_result(user_message, prompt_content)
 
-    monkeypatch.setattr("app.operation_agent.nodes.analyze_reason_node.llm_client.chat", fake_chat)
-    monkeypatch.setattr("app.operation_agent.nodes.generate_advice_node.llm_client.chat", fake_chat)
+    monkeypatch.setattr("app.operation_agent.nodes.analyze_reason_node.llm_client.achat", fake_achat)
+    monkeypatch.setattr("app.operation_agent.nodes.generate_advice_node.llm_client.achat", fake_achat)
 
 
 @pytest.fixture
-def operation_result(fake_operation_llm: None) -> OperationState:
+async def operation_result(fake_operation_llm: None) -> OperationState:
     register_all_tools()
-    return operation_graph.invoke(_safety_state())
+    return await operation_graph.ainvoke(_safety_state())
 
 
 class TestOperationGraph:
-    def test_graph_can_invoke(self, operation_result: OperationState):
+    @pytest.mark.anyio
+    async def test_graph_can_invoke(self, operation_result: OperationState):
         assert operation_result is not None
 
-    def test_safety_returns_final_answer(self, operation_result: OperationState):
+    @pytest.mark.anyio
+    async def test_safety_returns_final_answer(self, operation_result: OperationState):
         assert len(operation_result["final_answer"]) > 0
 
-    def test_final_answer_is_markdown(self, operation_result: OperationState):
+    @pytest.mark.anyio
+    async def test_final_answer_is_markdown(self, operation_result: OperationState):
         md = operation_result["final_answer"]
         assert md.startswith("## 运营分析报告")
         assert "###" in md
 
-    def test_evidence_not_empty(self, operation_result: OperationState):
+    @pytest.mark.anyio
+    async def test_evidence_not_empty(self, operation_result: OperationState):
         assert len(operation_result.get("evidence", [])) > 0
 
-    def test_abnormal_items_field_exists(self, operation_result: OperationState):
+    @pytest.mark.anyio
+    async def test_abnormal_items_field_exists(self, operation_result: OperationState):
         assert "abnormal_items" in operation_result
         assert isinstance(operation_result["abnormal_items"], list)
 
-    def test_advice_items_field_exists(self, operation_result: OperationState):
+    @pytest.mark.anyio
+    async def test_advice_items_field_exists(self, operation_result: OperationState):
         assert "advice_items" in operation_result
         assert isinstance(operation_result["advice_items"], list)
 
-    def test_analysis_basis_separates_data_and_knowledge_evidence(
+    @pytest.mark.anyio
+    async def test_analysis_basis_separates_data_and_knowledge_evidence(
         self,
         operation_result: OperationState,
     ):
@@ -129,7 +141,8 @@ class TestOperationGraph:
         assert basis["verification_steps"]
         assert 0 < basis["reasoning_confidence"] < 1
 
-    def test_advice_declares_evidence_boundary(self, operation_result: OperationState):
+    @pytest.mark.anyio
+    async def test_advice_declares_evidence_boundary(self, operation_result: OperationState):
         advice = operation_result["advice_items"][0]
         assert advice["conclusion_type"] == "recommendation"
         assert advice["knowledge_evidence"] == []
@@ -137,14 +150,17 @@ class TestOperationGraph:
         assert advice["verification_steps"]
         assert 0 < advice["confidence"] < 1
 
-    def test_trace_id_generated(self, operation_result: OperationState):
+    @pytest.mark.anyio
+    async def test_trace_id_generated(self, operation_result: OperationState):
         assert operation_result.get("trace_id", "").startswith("trace_")
 
-    def test_risk_items_field_exists(self, operation_result: OperationState):
+    @pytest.mark.anyio
+    async def test_risk_items_field_exists(self, operation_result: OperationState):
         assert "risk_items" in operation_result
         assert isinstance(operation_result["risk_items"], list)
 
-    def test_all_sections_in_final_answer(self, operation_result: OperationState):
+    @pytest.mark.anyio
+    async def test_all_sections_in_final_answer(self, operation_result: OperationState):
         md = operation_result["final_answer"]
         assert "总体判断" in md
         assert "关键发现" in md
@@ -152,7 +168,8 @@ class TestOperationGraph:
         assert "建议动作" in md
         assert "数据依据" in md
 
-    def test_query_node_uses_ioc_tools(self, operation_result: OperationState):
+    @pytest.mark.anyio
+    async def test_query_node_uses_ioc_tools(self, operation_result: OperationState):
         raw_data = operation_result["raw_data"]
         assert {"kpi", "alarm", "risk", "work_order", "ioc_summary"}.issubset(raw_data)
         assert operation_result["metrics"]
@@ -160,21 +177,24 @@ class TestOperationGraph:
         assert any(ev.get("source_type") == "risk_api" for ev in operation_result["evidence"])
         assert any(ev.get("source_type") == "work_order_api" for ev in operation_result["evidence"])
 
-    def test_detects_abnormal_and_risk_items(self, operation_result: OperationState):
+    @pytest.mark.anyio
+    async def test_detects_abnormal_and_risk_items(self, operation_result: OperationState):
         abnormal_types = {item.get("type") for item in operation_result["abnormal_items"]}
         assert "high_level_alarm" in abnormal_types
         assert "pending_risk" in abnormal_types
         assert operation_result["risk_items"]
 
-    def test_errors_does_not_crash_graph(self, fake_operation_llm: None):
+    @pytest.mark.anyio
+    async def test_errors_does_not_crash_graph(self, fake_operation_llm: None):
         register_all_tools()
         state = _safety_state()
         state["page_context"] = {"domain": "unknown_domain"}
-        result = operation_graph.invoke(state)
+        result = await operation_graph.ainvoke(state)
         assert result is not None
         assert "final_answer" in result
 
-    def test_capability_domain_uses_requested_context(self, fake_operation_llm: None):
+    @pytest.mark.anyio
+    async def test_capability_domain_uses_requested_context(self, fake_operation_llm: None):
         register_all_tools()
         state = _safety_state()
         state["page_context"] = {
@@ -184,7 +204,7 @@ class TestOperationGraph:
             "date": "2026-07",
         }
 
-        result = operation_graph.invoke(state)
+        result = await operation_graph.ainvoke(state)
         final_answer = result["final_answer"]
         error_messages = [item.get("message", "") for item in result.get("errors", [])]
 
@@ -235,7 +255,7 @@ async def test_operation_api_passes_request_user_context(
 ) -> None:
     captured: dict[str, object] = {}
 
-    def fake_analyze_operation(request, user_context=None, trace_id=None):
+    async def fake_analyze_operation(request, user_context=None, trace_id=None):
         captured["user_context"] = user_context
         captured["trace_id"] = trace_id
         return {
@@ -274,12 +294,14 @@ async def test_operation_api_passes_request_user_context(
     }
 
 
-def test_operation_report_normalizes_llm_report_shell(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_messy_chat(
+@pytest.mark.anyio
+async def test_operation_report_normalizes_llm_report_shell(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_messy_achat(
         prompt_content: str | None,
         user_message: str,
         history: list[dict[str, str]] | None = None,
         timeout_seconds: float | None = None,
+        provider_name: str | None = None,
     ) -> LlmResult:
         if "请只输出 JSON 数组" in user_message:
             content = json.dumps(
@@ -318,15 +340,15 @@ def test_operation_report_normalizes_llm_report_shell(monkeypatch: pytest.Monkey
 
     register_all_tools()
     monkeypatch.setattr(
-        "app.operation_agent.nodes.analyze_reason_node.llm_client.chat",
-        fake_messy_chat,
+        "app.operation_agent.nodes.analyze_reason_node.llm_client.achat",
+        fake_messy_achat,
     )
     monkeypatch.setattr(
-        "app.operation_agent.nodes.generate_advice_node.llm_client.chat",
-        fake_messy_chat,
+        "app.operation_agent.nodes.generate_advice_node.llm_client.achat",
+        fake_messy_achat,
     )
 
-    result = operation_graph.invoke(_safety_state())
+    result = await operation_graph.ainvoke(_safety_state())
     final_answer = result["final_answer"]
 
     assert "好的，作为企业级智能运营中心" not in final_answer
@@ -337,12 +359,14 @@ def test_operation_report_normalizes_llm_report_shell(monkeypatch: pytest.Monkey
     assert "**整体状态判断**" in final_answer
 
 
-def test_operation_llm_failure_reports_deepseek_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_failed_chat(
+@pytest.mark.anyio
+async def test_operation_llm_failure_reports_deepseek_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_failed_achat(
         prompt_content: str | None,
         user_message: str,
         history: list[dict[str, str]] | None = None,
         timeout_seconds: float | None = None,
+        provider_name: str | None = None,
     ) -> LlmResult:
         return LlmResult(
             content="",
@@ -358,15 +382,15 @@ def test_operation_llm_failure_reports_deepseek_fallback(monkeypatch: pytest.Mon
 
     register_all_tools()
     monkeypatch.setattr(
-        "app.operation_agent.nodes.analyze_reason_node.llm_client.chat",
-        fake_failed_chat,
+        "app.operation_agent.nodes.analyze_reason_node.llm_client.achat",
+        fake_failed_achat,
     )
     monkeypatch.setattr(
-        "app.operation_agent.nodes.generate_advice_node.llm_client.chat",
-        fake_failed_chat,
+        "app.operation_agent.nodes.generate_advice_node.llm_client.achat",
+        fake_failed_achat,
     )
 
-    result = operation_graph.invoke(_safety_state())
+    result = await operation_graph.ainvoke(_safety_state())
     final_answer = result["final_answer"]
 
     assert "DeepSeek 分析调用触发降级" in final_answer

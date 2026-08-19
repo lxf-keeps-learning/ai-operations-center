@@ -102,24 +102,24 @@ def test_report_chat_service_preserves_answer_when_inbox_enqueue_fails(
 
     class CompletedGraph:
         @staticmethod
-        def invoke(state, **_kwargs):
+        async def ainvoke(state, **_kwargs):
             return {**state, "message_id": "assistant_from_graph", "final_answer": "AI 回复"}
 
     monkeypatch.setattr(chat_service, "get_session_local", lambda: lambda: db)
-    monkeypatch.setattr(chat_service, "prepare_sync_report_chat_graph", lambda graph: graph)
     monkeypatch.setattr(chat_service, "report_chat_graph", CompletedGraph())
     monkeypatch.setattr(
         "app.operation_inbox.service.enqueue_for_review",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("inbox unavailable")),
     )
 
-    result = chat_service.send_chat_message(
+    import asyncio
+    result = asyncio.run(chat_service.send_chat_message(
         session_id=report_chat.id,
         report_id=8,
         question="请复核这条回答",
         user_id="operator",
         trace_id="trace_enqueue_failure",
-    )
+    ))
 
     assert result["final_answer"] == "AI 回复"
     assert result["runtime_session_id"]

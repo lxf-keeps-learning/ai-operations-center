@@ -48,6 +48,14 @@ def report_chat_graph_db(monkeypatch: pytest.MonkeyPatch) -> Iterator[Session]:
     Base.metadata.drop_all(engine)
 
 
+async def _async_llm_result(content: str) -> LlmResult:
+    return _fake_llm(content)
+
+
+async def _async_rag_failure(_req: object) -> RagSearchResponse:
+    return RagSearchResponse(success=False, results=[], total=0, error_message="RAG 超时")
+
+
 def _fake_llm(content: str = "测试回答") -> LlmResult:
     return LlmResult(
         content=content,
@@ -60,7 +68,7 @@ def _fake_llm(content: str = "测试回答") -> LlmResult:
     )
 
 
-def _fake_rag_response(results: list[dict] | None = None) -> RagSearchResponse:
+async def _fake_rag_response(results: list[dict] | None = None) -> RagSearchResponse:
     items = results or [
         RagSearchResult(
             source_id="DOC_001",
@@ -76,11 +84,12 @@ def _fake_rag_response(results: list[dict] | None = None) -> RagSearchResponse:
 class TestGraphRagBranch:
     """Graph RAG 分支集成测试。"""
 
-    def test_report_internal_skips_rag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.anyio
+    async def test_report_internal_skips_rag(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """报告内问题 → 不调用 RAG → used_rag=False。"""
         monkeypatch.setattr(
-            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.chat",
-            lambda **kw: _fake_llm("根据当前报告，该风险排第一。"),
+            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.achat",
+            lambda **kw: _async_llm_result("根据当前报告，该风险排第一。"),
         )
 
         state: ReportChatState = {
@@ -118,20 +127,21 @@ class TestGraphRagBranch:
             "errors": [],
         }
 
-        result = report_chat_graph.invoke(state)
+        result = await report_chat_graph.ainvoke(state)
 
         assert result.get("used_rag") is False
         assert result.get("final_answer")
         assert result.get("rag_source_refs") == []
 
-    def test_zhidu_wenti_triggers_rag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.anyio
+    async def test_zhidu_wenti_triggers_rag(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """制度依据问题 → 调用 RAG → used_rag=True → 返回 rag_source_refs。"""
         monkeypatch.setattr(
-            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.chat",
-            lambda **kw: _fake_llm("根据当前报告和知识库规..."),
+            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.achat",
+            lambda **kw: _async_llm_result("根据当前报告和知识库规..."),
         )
         monkeypatch.setattr(
-            "app.report_chat_agent.nodes.call_rag_node.rag_service.retrieve",
+            "app.report_chat_agent.nodes.call_rag_node.rag_service.aretrieve",
             lambda _req: _fake_rag_response(),
         )
 
@@ -170,24 +180,25 @@ class TestGraphRagBranch:
             "errors": [],
         }
 
-        result = report_chat_graph.invoke(state)
+        result = await report_chat_graph.ainvoke(state)
 
         assert result.get("used_rag") is True
         assert len(result.get("rag_source_refs", [])) > 0
         assert "DOC_001" in result.get("rag_source_refs", [])
         assert result.get("final_answer")
 
-    def test_report_related_history_question_triggers_rag(
+    @pytest.mark.anyio
+    async def test_report_related_history_question_triggers_rag(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """report_related 的历史案例/整改问题仍能进入 RAG 分支。"""
         monkeypatch.setattr(
-            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.chat",
-            lambda **kw: _fake_llm("根据报告和历史案例回答。"),
+            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.achat",
+            lambda **kw: _async_llm_result("根据报告和历史案例回答。"),
         )
         monkeypatch.setattr(
-            "app.report_chat_agent.nodes.call_rag_node.rag_service.retrieve",
+            "app.report_chat_agent.nodes.call_rag_node.rag_service.aretrieve",
             lambda _req: _fake_rag_response(),
         )
 
@@ -226,23 +237,24 @@ class TestGraphRagBranch:
             "errors": [],
         }
 
-        result = report_chat_graph.invoke(state)
+        result = await report_chat_graph.ainvoke(state)
 
         assert result.get("question_scope") == "report_related"
         assert result.get("used_rag") is True
         assert result.get("rag_source_refs") == ["DOC_001"]
 
-    def test_rule_question_triggers_rag_and_returns_sources(
+    @pytest.mark.anyio
+    async def test_rule_question_triggers_rag_and_returns_sources(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """用户询问本质安全判断规则 → 走 RAG，返回知识库依据明细。"""
         monkeypatch.setattr(
-            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.chat",
-            lambda **kw: _fake_llm("根据知识库中的本质安全判断规则回答。"),
+            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.achat",
+            lambda **kw: _async_llm_result("根据知识库中的本质安全判断规则回答。"),
         )
         monkeypatch.setattr(
-            "app.report_chat_agent.nodes.call_rag_node.rag_service.retrieve",
+            "app.report_chat_agent.nodes.call_rag_node.rag_service.aretrieve",
             lambda _req: _fake_rag_response([
                 RagSearchResult(
                     source_id="DOC_REG_006",
@@ -290,22 +302,23 @@ class TestGraphRagBranch:
             "errors": [],
         }
 
-        result = report_chat_graph.invoke(state)
+        result = await report_chat_graph.ainvoke(state)
 
         assert result.get("question_scope") == "report_related"
         assert result.get("used_rag") is True
         assert result.get("rag_source_refs") == ["DOC_REG_006"]
         assert result.get("rag_sources", [])[0]["document_title"] == "本质安全判断规则与分级标准"
 
-    def test_rag_failure_does_not_crash(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.anyio
+    async def test_rag_failure_does_not_crash(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """RAG 服务失败 → Graph 不崩溃，used_rag=False，正常回答。"""
         monkeypatch.setattr(
-            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.chat",
-            lambda **kw: _fake_llm("根据当前报告回答。"),
+            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.achat",
+            lambda **kw: _async_llm_result("根据当前报告回答。"),
         )
         monkeypatch.setattr(
-            "app.report_chat_agent.nodes.call_rag_node.rag_service.retrieve",
-            lambda _req: RagSearchResponse(success=False, results=[], total=0, error_message="RAG 超时"),
+            "app.report_chat_agent.nodes.call_rag_node.rag_service.aretrieve",
+            _async_rag_failure,
         )
 
         state: ReportChatState = {
@@ -344,7 +357,7 @@ class TestGraphRagBranch:
         }
 
         # Graph 不应崩溃。
-        result = report_chat_graph.invoke(state)
+        result = await report_chat_graph.ainvoke(state)
 
         assert result.get("used_rag") is False
         assert result.get("final_answer")
@@ -352,14 +365,15 @@ class TestGraphRagBranch:
         has_rag_error = any(e.get("node") == "call_rag" for e in result.get("errors", []))
         assert has_rag_error
 
-    def test_out_of_scope_does_not_call_rag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.anyio
+    async def test_out_of_scope_does_not_call_rag(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """无关问题 → BoundaryResponseNode 拦截 → 不调用 RAG。"""
         def rag_should_not_be_called(*args: object, **kwargs: object) -> object:
             msg = "RAG 不应在无关问题上被调用"
             raise RuntimeError(msg)
 
         monkeypatch.setattr(
-            "app.report_chat_agent.nodes.call_rag_node.rag_service.retrieve",
+            "app.report_chat_agent.nodes.call_rag_node.rag_service.aretrieve",
             rag_should_not_be_called,
         )
 
@@ -398,7 +412,7 @@ class TestGraphRagBranch:
             "errors": [],
         }
 
-        result = report_chat_graph.invoke(state)
+        result = await report_chat_graph.ainvoke(state)
 
         assert result.get("used_rag") is False
         assert "无关" in result.get("final_answer", "") or "当前" in result.get("final_answer", "")

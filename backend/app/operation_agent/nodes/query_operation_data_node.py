@@ -1,7 +1,7 @@
 # Operation Graph 数据查询节点
 #
 # 这是 Tool Center 真正进入 Operation Graph 的关键入口：
-#   LangGraph → OperationState → query_operation_data_node → get_tool → tool.run()
+#   LangGraph → OperationState → query_operation_data_node → get_tool → await tool.run()
 #
 # 职责：
 #   1. 从 state 解析用户上下文（domain、department、time_range）
@@ -10,8 +10,10 @@
 #   4. 将原始数据和衍生指标写回 state，供下游 LLM 节点使用
 #
 # 设计要点：
-#   - Node 不直接 import 任何具体 Tool 类，只依赖 get_tool("kpi_query") 按名称获取
+#   - Node 不直接 import 任何具体 Tool 类，只按名称经 get_tool 获取
 #   - 切换 Mock ↔ 真实 IOC 只需改 register.py 中的 Client，本文件不动
+#   - 本节点为 async：tool.run 受 BaseTool 内建超时与 Deadline 取消约束，
+#     LangGraph 对 async Node 执行取消时取消会穿透到 Tool 协程
 #   - _run_tool 内部用 ToolResult 协议，不处理裸异常（BaseTool.run 已确保）
 
 from typing import Any
@@ -99,7 +101,7 @@ _DOMAIN_SNAPSHOTS: dict[str, list[dict[str, Any]]] = {
 }
 
 
-def query_operation_data_node(state: OperationState) -> OperationState:
+async def query_operation_data_node(state: OperationState) -> OperationState:
     """Operation Graph 的数据查询阶段入口。
 
     在 Graph 中的位置：init_context → **query_operation_data** → detect_abnormal → ...
@@ -117,13 +119,13 @@ def query_operation_data_node(state: OperationState) -> OperationState:
     elif domain in _DOMAIN_SNAPSHOTS:
         _load_domain_snapshot(state, domain)
     else:
-        _query_operation_snapshot(state, errors)
+        await _query_operation_snapshot(state, errors)
 
     state["errors"] = state.get("errors", []) + errors
     return state
 
 
-def _query_operation_snapshot(state: OperationState, errors: list[dict]) -> None:
+async def _query_operation_snapshot(state: OperationState, errors: list[dict]) -> None:
     """核心查询流程：并发调用四个 Query Tool → 聚合分析 → 写入 state。
 
     数据流：
@@ -141,7 +143,7 @@ def _query_operation_snapshot(state: OperationState, errors: list[dict]) -> None
     # 依次调用四个 Query Tool，将结果写入 state.raw_data
     tool_data: dict[str, dict[str, Any]] = {}
     for key, tool_name in _QUERY_TOOLS.items():
-        result = _run_tool(tool_name, filters.get(key, {}), context, errors)
+        result = await _run_tool(tool_name, filters.get(key, {}), context, errors)
         if not result or not result.success:
             continue
 
@@ -153,7 +155,7 @@ def _query_operation_snapshot(state: OperationState, errors: list[dict]) -> None
 
     # 四个 Query 都执行完毕后，调用聚合分析 Tool
     if tool_data:
-        summary = _run_summary_tool(tool_data, context, errors)
+        summary = await _run_summary_tool(tool_data, context, errors)
         if summary and summary.success and isinstance(summary.data, dict):
             raw_data["ioc_summary"] = summary.data
             evidence.extend(_serialize_evidence(summary, "ioc_summary_analysis"))
@@ -193,7 +195,7 @@ def _load_domain_snapshot(state: OperationState, domain: str) -> None:
     ]
 
 
-def _run_tool(
+async def _run_tool(
     tool_name: str,
     filters: dict[str, Any],
     context: ToolContext,
@@ -211,7 +213,7 @@ def _run_tool(
         return None
 
     try:
-        result = tool.run(BaseToolInput(context=context, filters=filters))
+        result = await tool.run(BaseToolInput(context=context, filters=filters))
         if not result.success:
             errors.append(
                 {
@@ -225,13 +227,13 @@ def _run_tool(
         return None
 
 
-def _run_summary_tool(
+async def _run_summary_tool(
     tool_data: dict[str, dict[str, Any]],
     context: ToolContext,
     errors: list[dict],
 ) -> ToolResult | None:
     """将四个 Query Tool 的 data 传给 IocSummaryAnalysisTool 做聚合分析。"""
-    return _run_tool(
+    return await _run_tool(
         "ioc_summary_analysis",
         {
             "kpi_data": tool_data.get("kpi", {}),

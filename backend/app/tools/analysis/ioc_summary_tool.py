@@ -19,6 +19,7 @@ from pydantic import Field, ValidationError
 from app.tool_center.base_tool import BaseTool
 from app.tool_center.exceptions import ToolException
 from app.tool_center.contracts import BaseToolInput, Evidence
+from app.tool_registry.contracts import ToolType
 
 
 def _count(items: list[dict[str, Any]], field: str) -> dict[str, int]:
@@ -111,8 +112,9 @@ class IocSummaryAnalysisTool(BaseTool):
         "（KPI 状态统计、告警等级分组、风险评分），"
         "不调用 LLM。"
     )
+    tool_type = ToolType.ANALYSIS
 
-    def _execute(
+    async def _execute(
         self,
         tool_input: BaseToolInput,
     ) -> tuple[dict | None, list[Evidence], dict[str, Any]]:

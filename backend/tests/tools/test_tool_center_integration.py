@@ -29,49 +29,55 @@ class TestToolCenterIntegration:
     def setup_method(self):
         register_all_tools()
 
-    def _run_tool(self, name: str, filters: dict | None = None):
-        return registry.get(name).run(BaseToolInput(filters=filters or {}))
+    async def _run_tool(self, name: str, filters: dict | None = None):
+        return await registry.get(name).run(BaseToolInput(filters=filters or {}))
 
     # Step 1: registry 获取 Tool
 
-    def test_registry_returns_all_tools(self):
+    @pytest.mark.anyio
+    async def test_registry_returns_all_tools(self):
         assert REQUIRED_TOOLS.issubset(set(registry.list_tools()))
 
     # Step 2: 调用 Query Tool
 
-    def test_query_kpi_returns_tool_result(self):
-        result = self._run_tool("kpi_query", {"department": "能源运营部"})
+    @pytest.mark.anyio
+    async def test_query_kpi_returns_tool_result(self):
+        result = await self._run_tool("kpi_query", {"department": "能源运营部"})
         assert result.success is True
         assert result.data["total"] > 0
         assert len(result.evidence) > 0
         assert result.trace_id is not None
         assert result.metadata["source"] == "mock_ioc_api"
 
-    def test_query_alarm_returns_tool_result(self):
-        result = self._run_tool("alarm_query", {"alarm_level": "high"})
+    @pytest.mark.anyio
+    async def test_query_alarm_returns_tool_result(self):
+        result = await self._run_tool("alarm_query", {"alarm_level": "high"})
         assert result.success is True
         assert result.data["total"] > 0
 
-    def test_query_risk_returns_tool_result(self):
-        result = self._run_tool("risk_query", {"risk_level": "high"})
+    @pytest.mark.anyio
+    async def test_query_risk_returns_tool_result(self):
+        result = await self._run_tool("risk_query", {"risk_level": "high"})
         assert result.success is True
         assert result.data["total"] > 0
 
-    def test_query_work_order_returns_tool_result(self):
-        result = self._run_tool("work_order_query", {"status": "pending"})
+    @pytest.mark.anyio
+    async def test_query_work_order_returns_tool_result(self):
+        result = await self._run_tool("work_order_query", {"status": "pending"})
         assert result.success is True
         assert result.data["total"] > 0
 
     # Step 3: 拿到 ToolResult 放入 Analysis Tool
 
-    def test_analysis_accepts_query_results(self):
-        kpi = self._run_tool("kpi_query").data
-        alarm = self._run_tool("alarm_query").data
-        risk = self._run_tool("risk_query").data
-        wo = self._run_tool("work_order_query").data
+    @pytest.mark.anyio
+    async def test_analysis_accepts_query_results(self):
+        kpi = (await self._run_tool("kpi_query")).data
+        alarm = (await self._run_tool("alarm_query")).data
+        risk = (await self._run_tool("risk_query")).data
+        wo = (await self._run_tool("work_order_query")).data
 
         inp = AnalysisInput(kpi_data=kpi, alarm_data=alarm, risk_data=risk, work_order_data=wo)
-        result = registry.get("ioc_summary_analysis").run(inp)
+        result = await registry.get("ioc_summary_analysis").run(inp)
 
         assert result.success is True
         assert result.data["risk_score"] >= 0
@@ -82,8 +88,9 @@ class TestToolCenterIntegration:
 
     # Step 4: Action Tool 生成工单草稿
 
-    def test_action_draft_from_alarm(self):
-        result = registry.get("work_order_draft").run(
+    @pytest.mark.anyio
+    async def test_action_draft_from_alarm(self):
+        result = await registry.get("work_order_draft").run(
             BaseToolInput(
                 filters={
                     "source_type": "alarm",
@@ -102,25 +109,26 @@ class TestToolCenterIntegration:
 
     # Step 5: 完整调用链
 
-    def test_full_chain_query_analysis_action(self):
+    @pytest.mark.anyio
+    async def test_full_chain_query_analysis_action(self):
         # 1) 查 KPI
-        kpi_r = self._run_tool("kpi_query")
+        kpi_r = await self._run_tool("kpi_query")
         assert kpi_r.success is True
 
         # 2) 查告警
-        alarm_r = self._run_tool("alarm_query")
+        alarm_r = await self._run_tool("alarm_query")
         assert alarm_r.success is True
 
         # 3) 查隐患
-        risk_r = self._run_tool("risk_query")
+        risk_r = await self._run_tool("risk_query")
         assert risk_r.success is True
 
         # 4) 查工单
-        work_order_r = self._run_tool("work_order_query")
+        work_order_r = await self._run_tool("work_order_query")
         assert work_order_r.success is True
 
         # 5) 聚合分析
-        analysis_r = registry.get("ioc_summary_analysis").run(
+        analysis_r = await registry.get("ioc_summary_analysis").run(
             AnalysisInput(
                 kpi_data=kpi_r.data,
                 alarm_data=alarm_r.data,
@@ -135,7 +143,7 @@ class TestToolCenterIntegration:
         assert analysis_r.data["work_order"]["total"] > 0
 
         # 6) 生成工单草稿（基于 high 告警）
-        draft_r = registry.get("work_order_draft").run(
+        draft_r = await registry.get("work_order_draft").run(
             BaseToolInput(
                 filters={
                     "source_type": "alarm",
@@ -154,16 +162,18 @@ class TestToolCenterIntegration:
 
     # Step 6: 错误链路
 
-    def test_nonexistent_tool_returns_error(self):
+    @pytest.mark.anyio
+    async def test_nonexistent_tool_returns_error(self):
         with pytest.raises(ToolNotFoundError, match="Tool not found: nonexistent_tool"):
             registry.get("nonexistent_tool")
 
-    def test_query_failure_propagates_as_success_false(self):
+    @pytest.mark.anyio
+    async def test_query_failure_propagates_as_success_false(self):
         class FailingClient(MockIocApiClient):
-            def get_kpis(self, filters: dict | None = None) -> IocApiResponse:
+            async def aget_kpis(self, filters: dict | None = None) -> IocApiResponse:
                 return IocApiResponse(success=False, error="mock failure")
 
         tool = KpiQueryTool(client=FailingClient())
-        result = tool.run(BaseToolInput())
+        result = await tool.run(BaseToolInput())
         assert result.success is False
         assert result.error is not None

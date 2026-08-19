@@ -13,14 +13,14 @@ MCP_TOOL_MAP: dict[str, str] = {
 }
 
 
-def execute_query_tool(registry_name: str, filters: dict[str, Any] | None = None) -> str:
+async def execute_query_tool(registry_name: str, filters: dict[str, Any] | None = None) -> str:
     tool = get_tool(registry_name)
     inp = BaseToolInput(context=ToolContext(), filters=filters or {})
-    result = tool.run(inp)
+    result = await tool.run(inp)
     return result.model_dump_json(indent=2, exclude_none=True)
 
 
-def execute_analysis_tool(
+async def execute_analysis_tool(
     kpi_data: dict[str, Any] | None = None,
     alarm_data: dict[str, Any] | None = None,
     risk_data: dict[str, Any] | None = None,
@@ -38,5 +38,5 @@ def execute_analysis_tool(
     if work_order_data is not None:
         merged_filters["work_order_data"] = work_order_data
     inp = BaseToolInput(context=ToolContext(), filters=merged_filters)
-    result = tool.run(inp)
+    result = await tool.run(inp)
     return result.model_dump_json(indent=2, exclude_none=True)

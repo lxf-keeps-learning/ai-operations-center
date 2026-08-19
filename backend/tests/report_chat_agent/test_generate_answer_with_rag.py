@@ -17,6 +17,11 @@ from app.report_chat_agent.state import ReportChatState
 from app.runtime.llm.client import LlmResult
 
 
+
+
+async def _async_fake_llm(**kwargs: Any) -> LlmResult:
+    return _fake_llm_result(kwargs.get("result_content", "测试回答内容"))
+
 def _fake_llm_result(content: str = "测试回答内容", success: bool = True) -> LlmResult:
     return LlmResult(
         content=content,
@@ -79,37 +84,39 @@ def _base_state(
 class TestGenerateAnswerWithRag:
     """GenerateReportAnswerNode 在 RAG 场景下的行为测试。"""
 
-    def test_uses_report_answer_when_no_rag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.anyio
+    async def test_uses_report_answer_when_no_rag(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """used_rag=False → 使用 report_answer.md 模板。"""
         state = _base_state(used_rag=False)
         captured: dict[str, Any] = {}
 
-        def capturing_chat(**kwargs: Any) -> LlmResult:
+        async def capturing_chat(**kwargs: Any) -> LlmResult:
             captured.update(kwargs)
             return _fake_llm_result("仅基于报告的回答")
 
         monkeypatch.setattr(
-            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.chat",
+            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.achat",
             capturing_chat,
         )
 
-        result = generate_report_answer_node(state)
+        result = await generate_report_answer_node(state)
         user_msg = captured.get("user_message", "")
         assert result["answer_type"] == "normal"
         assert result["final_answer"] == "仅基于报告的回答"
         assert "检索到的报告片段" in user_msg
         assert "RAG 检索结果" not in user_msg
 
-    def test_uses_rag_answer_when_rag_enabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.anyio
+    async def test_uses_rag_answer_when_rag_enabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """used_rag=True 且 rag_results 有内容 → 使用 rag_answer.md 模板。"""
         captured: dict[str, Any] = {}
 
-        def capturing_chat(**kwargs: Any) -> LlmResult:
+        async def capturing_chat(**kwargs: Any) -> LlmResult:
             captured.update(kwargs)
             return _fake_llm_result("基于报告和知识库的回答")
 
         monkeypatch.setattr(
-            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.chat",
+            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.achat",
             capturing_chat,
         )
 
@@ -122,38 +129,43 @@ class TestGenerateAnswerWithRag:
         ]
 
         state = _base_state(used_rag=True, rag_results=rag_results, merged_context=merged_context)
-        result = generate_report_answer_node(state)
+        result = await generate_report_answer_node(state)
 
         user_msg = captured.get("user_message", "")
         assert result["answer_type"] == "normal"
         assert result["final_answer"] == "基于报告和知识库的回答"
         assert "合并上下文" in user_msg or "RAG 检索结果" in user_msg
 
-    def test_rag_empty_falls_back_to_report(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.anyio
+    async def test_rag_empty_falls_back_to_report(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """used_rag=True 但 rag_results 为空 → 使用 report_answer.md 模板。"""
         captured: dict[str, Any] = {}
 
-        def capturing_chat(**kwargs: Any) -> LlmResult:
+        async def capturing_chat(**kwargs: Any) -> LlmResult:
             captured.update(kwargs)
             return _fake_llm_result("基于报告的回答")
 
         monkeypatch.setattr(
-            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.chat",
+            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.achat",
             capturing_chat,
         )
 
         state = _base_state(used_rag=True, rag_results=[])
-        result = generate_report_answer_node(state)
+        result = await generate_report_answer_node(state)
 
         user_msg = captured.get("user_message", "")
         assert result["answer_type"] == "normal"
         assert "检索到的报告片段" in user_msg
 
-    def test_llm_failure_fallback_includes_rag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.anyio
+    async def test_llm_failure_fallback_includes_rag(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """LLM 调用失败 → fallback 回答中包含 RAG 结果。"""
+        async def failed_chat(**kwargs: Any) -> LlmResult:
+            return _fake_llm_result("", success=False)
+
         monkeypatch.setattr(
-            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.chat",
-            lambda **kwargs: _fake_llm_result("", success=False),
+            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.achat",
+            failed_chat,
         )
 
         rag_results = [
@@ -161,51 +173,57 @@ class TestGenerateAnswerWithRag:
         ]
 
         state = _base_state(used_rag=True, rag_results=rag_results)
-        result = generate_report_answer_node(state)
+        result = await generate_report_answer_node(state)
 
         assert result["answer_type"] == "normal"
         assert result["final_answer"]
         assert "知识库补充依据" in result["final_answer"]
         assert "治理规范" in result["final_answer"]
 
-    def test_llm_exception_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.anyio
+    async def test_llm_exception_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """LLM 抛异常 → fallback 回答。"""
-        def broken_chat(**kwargs: Any) -> LlmResult:
+        async def broken_chat(**kwargs: Any) -> LlmResult:
             msg = "connection error"
             raise RuntimeError(msg)
 
         monkeypatch.setattr(
-            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.chat",
+            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.achat",
             broken_chat,
         )
 
         state = _base_state(used_rag=False)
-        result = generate_report_answer_node(state)
+        result = await generate_report_answer_node(state)
 
         assert result["answer_type"] == "normal"
         assert result["final_answer"]
         assert any(e["node"] == "generate_answer" for e in result["errors"])
 
-    def test_load_report_error_skips_llm(self) -> None:
+    @pytest.mark.anyio
+    async def test_load_report_error_skips_llm(self) -> None:
         """load_report_context 失败 → 不调用 LLM，直接返回错误提示。"""
         state = _base_state(
             errors=[{"node": "load_report_context", "message": "报告不存在"}],
         )
         state["report_context"] = {}
-        result = generate_report_answer_node(state)
+        result = await generate_report_answer_node(state)
 
         assert result["answer_type"] == "insufficient_evidence"
         assert "无法加载" in result["final_answer"]
 
-    def test_sprint5_compatibility(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.anyio
+    async def test_sprint5_compatibility(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Sprint5 原有报告追问行为不受影响。"""
+        async def sprint5_chat(**kwargs: Any) -> LlmResult:
+            return _fake_llm_result("根据当前报告，该风险排第一...")
+
         monkeypatch.setattr(
-            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.chat",
-            lambda **kwargs: _fake_llm_result("根据当前报告，该风险排第一..."),
+            "app.report_chat_agent.nodes.generate_report_answer_node.llm_client.achat",
+            sprint5_chat,
         )
 
         state = _base_state(question="为什么这个风险排第一？", used_rag=False)
-        result = generate_report_answer_node(state)
+        result = await generate_report_answer_node(state)
 
         assert result["answer_type"] == "normal"
         assert result["final_answer"] == "根据当前报告，该风险排第一..."

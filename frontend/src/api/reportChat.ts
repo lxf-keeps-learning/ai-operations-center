@@ -82,6 +82,6 @@ export async function sendReportChatMessage(params: {
       report_id: params.reportId,
       question: params.question,
     }),
-    timeout: 120_000,
+    timeout: 125_000,
   })
 }

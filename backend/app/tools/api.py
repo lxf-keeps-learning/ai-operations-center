@@ -36,7 +36,7 @@ def get_tools() -> ApiResponse[list[ToolDescriptor]]:
 
 
 @router.post("/tools/call", response_model=ApiResponse[dict])
-def call_tool(payload: ToolCallRequest) -> ApiResponse[dict]:
+async def call_tool(payload: ToolCallRequest) -> ApiResponse[dict]:
     try:
         tool = get_tool(payload.tool_name)
     except ToolNotFoundError as e:
@@ -49,5 +49,5 @@ def call_tool(payload: ToolCallRequest) -> ApiResponse[dict]:
         context=payload.context,
         filters=merged_filters,
     )
-    result = tool.run(inp)
+    result = await tool.run(inp)
     return ApiResponse(data=result.model_dump())

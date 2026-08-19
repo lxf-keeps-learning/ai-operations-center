@@ -15,7 +15,7 @@ Sprint6 新增 RAG 分支：
   - RAG 分支是可选的，不影响不需要 RAG 的问题。
   - 无关问题和 IOC 全局问题仍然走 boundary_response，不调用 RAG。
 """
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from langgraph.config import get_stream_writer
@@ -36,8 +36,7 @@ from app.report_chat_agent.memory import load_chat_memory_node, save_chat_memory
 from app.report_chat_agent.persistence import get_report_chat_persistence
 from app.report_chat_agent.state import ReportChatState
 
-
-ReportChatNode = Callable[..., ReportChatState]
+ReportChatNode = Callable[..., ReportChatState | Awaitable[ReportChatState]]
 
 NODE_METADATA: dict[str, dict[str, str]] = {
     "load_report_context": {
@@ -98,7 +97,31 @@ def _with_stream_events(
     node_name: str,
     node_func: ReportChatNode,
 ) -> ReportChatNode:
-    """包装节点函数，在节点入口发射 node_started 自定义事件。"""
+    """包装节点函数，在节点入口发射 node_started 自定义事件。
+
+    与 node_func 保持相同异步性：async 节点的事件循环内执行，
+    取消可穿透到 LLM / RAG await。
+    """
+
+    async def wrapped_async(state: ReportChatState, runtime: Any = None) -> ReportChatState:
+        try:
+            writer = get_stream_writer()
+            writer({
+                "kind": "node_started",
+                "node_key": node_key,
+                "node_name": node_name,
+            })
+        except RuntimeError:
+            pass
+        result = node_func(state) if runtime is None else (
+            node_func(state, runtime)
+            if node_func in (load_chat_memory_node, save_chat_memory_node)
+            else node_func(state)
+        )
+        if result is not None and hasattr(result, "__await__"):
+            return await result
+        return result
+
     def wrapped(state: ReportChatState, runtime: Any = None) -> ReportChatState:
         try:
             writer = get_stream_writer()
@@ -112,7 +135,14 @@ def _with_stream_events(
         if runtime is None:
             return node_func(state)
         return node_func(state, runtime) if node_func in (load_chat_memory_node, save_chat_memory_node) else node_func(state)
-    return wrapped
+
+    return wrapped_async if _is_coroutine_node(node_func) else wrapped
+
+
+def _is_coroutine_node(node_func: ReportChatNode) -> bool:
+    import inspect
+
+    return inspect.iscoroutinefunction(node_func)
 
 
 def _route_after_classify(state: ReportChatState) -> str:

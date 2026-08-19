@@ -17,11 +17,13 @@ class AppException(Exception):
         message: str = INTERNAL_ERROR.message,
         http_status: int = INTERNAL_ERROR.http_status,
         data: Any = None,
+        retryable: bool = False,
     ):
         self.code = code
         self.message = message
         self.http_status = http_status
         self.data = data
+        self.retryable = retryable
         super().__init__(message)
 
     @classmethod

@@ -8,6 +8,9 @@ interface SseBlock {
   data: string
 }
 
+const STREAM_OVERALL_TIMEOUT_MS = 125_000
+const STREAM_IDLE_TIMEOUT_MS = 35_000
+
 export function streamOperationAnalysis(
   params: OperationAnalyzeParams,
   handlers: StreamHandlers,
@@ -15,6 +18,38 @@ export function streamOperationAnalysis(
   const controller = new AbortController()
   const body = JSON.stringify(params)
   const traceId = createTraceId()
+
+  let overallTimer: number | undefined
+  let idleTimer: number | undefined
+  let settled = false
+
+  const clearTimers = () => {
+    if (overallTimer !== undefined) window.clearTimeout(overallTimer)
+    if (idleTimer !== undefined) window.clearTimeout(idleTimer)
+    overallTimer = undefined
+    idleTimer = undefined
+  }
+
+  const fail = (message: string, code: string) => {
+    if (settled) return
+    settled = true
+    clearTimers()
+    controller.abort()
+    const error = new Error(message)
+    ;(error as Error & { code?: string }).code = code
+    handlers.onError(error)
+  }
+
+  const armIdleTimer = () => {
+    if (idleTimer !== undefined) window.clearTimeout(idleTimer)
+    idleTimer = window.setTimeout(() => {
+      fail('事件流空闲超时，已断开连接', 'STREAM_IDLE_TIMEOUT')
+    }, STREAM_IDLE_TIMEOUT_MS)
+  }
+
+  overallTimer = window.setTimeout(() => {
+    fail('报告生成超过时限（125 秒），已停止等待', 'STREAM_TIMEOUT')
+  }, STREAM_OVERALL_TIMEOUT_MS)
 
   fetch(buildApiUrl('/operation/analyze/stream'), {
     method: 'POST',
@@ -30,13 +65,13 @@ export function streamOperationAnalysis(
       setLastTraceId(response.headers.get('X-Trace-Id') || traceId)
       if (!response.ok) {
         const text = await response.text().catch(() => '')
-        handlers.onError(new Error(`HTTP ${response.status}: ${text}`))
+        fail(`HTTP ${response.status}: ${text}`, 'STREAM_HTTP_ERROR')
         return
       }
 
       const reader = response.body?.getReader()
       if (!reader) {
-        handlers.onError(new Error('Response body is not readable'))
+        fail('Response body is not readable', 'STREAM_READ_ERROR')
         return
       }
 
@@ -53,15 +88,17 @@ export function streamOperationAnalysis(
           const parsed = parseSseBlock(rawBlock)
           if (!parsed) continue
 
+          armIdleTimer() // 任意业务事件或心跳刷新空闲计时
           try {
             handlers.onEvent(JSON.parse(parsed.data) as AnalysisStreamEvent)
           } catch {
-            handlers.onError(new Error(`Failed to parse SSE data: ${parsed.data.slice(0, 100)}`))
+            fail(`Failed to parse SSE data: ${parsed.data.slice(0, 100)}`, 'STREAM_PARSE_ERROR')
           }
         }
       }
 
       try {
+        armIdleTimer()
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
@@ -76,21 +113,33 @@ export function streamOperationAnalysis(
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') {
+          if (!settled) clearTimers() // 用户主动取消：静默收尾
           return
         }
-        handlers.onError(err instanceof Error ? err : new Error(String(err)))
+        fail(err instanceof Error ? err.message : String(err), 'STREAM_READ_ERROR')
         return
       }
 
-      handlers.onClose()
+      if (!settled) {
+        settled = true
+        clearTimers()
+        handlers.onClose()
+      }
     })
     .catch((err) => {
-      if (err instanceof DOMException && err.name === 'AbortError') return
-      handlers.onError(err instanceof Error ? err : new Error(String(err)))
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        if (!settled) clearTimers()
+        return
+      }
+      fail(err instanceof Error ? err.message : String(err), 'STREAM_NETWORK_ERROR')
     })
 
   return {
-    abort: () => controller.abort(),
+    abort: () => {
+      settled = true
+      clearTimers()
+      controller.abort()
+    },
   }
 }
 

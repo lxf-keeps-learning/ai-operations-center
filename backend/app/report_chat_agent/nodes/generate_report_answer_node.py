@@ -41,7 +41,7 @@ def _load_prompt(name: str) -> str:
     return ""
 
 
-def generate_report_answer_node(state: ReportChatState) -> ReportChatState:
+async def generate_report_answer_node(state: ReportChatState) -> ReportChatState:
     user_question = state.get("user_question", "")
     report_context = state.get("report_context", {})
     retrieved_context = state.get("retrieved_context", [])
@@ -136,14 +136,14 @@ def generate_report_answer_node(state: ReportChatState) -> ReportChatState:
                     "kind": "llm_token",
                     "token": text,
                 })
-            result = llm_client.stream_chat(
+            result = await llm_client.astream_chat(
                 prompt_content=system,
                 user_message=prompt,
                 on_chunk=on_chunk,
                 timeout_seconds=settings.operation_llm_timeout_seconds,
             )
         else:
-            result = llm_client.chat(
+            result = await llm_client.achat(
                 prompt_content=system,
                 user_message=prompt,
                 timeout_seconds=settings.operation_llm_timeout_seconds,

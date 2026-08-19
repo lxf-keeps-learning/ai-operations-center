@@ -24,7 +24,7 @@ from app.report_chat_agent.state import ReportChatState
 logger = logging.getLogger(__name__)
 
 
-def call_rag_node(state: ReportChatState) -> ReportChatState:
+async def call_rag_node(state: ReportChatState) -> ReportChatState:
     """调用外部 RAG 服务，将检索结果写入 State。
 
     该 Node 不生成最终回答，只负责获取 RAG 检索结果并写入：
@@ -68,7 +68,7 @@ def call_rag_node(state: ReportChatState) -> ReportChatState:
 
     # 构造 RagSearchRequest 并调用服务。
     request = _build_request(rag_query_raw)
-    response = _do_retrieve(request)
+    response = await _do_retrieve(request)
 
     state["rag_query"] = rag_query_raw
 
@@ -128,9 +128,9 @@ def _build_request(rag_query_raw: dict) -> RagSearchRequest:
     )
 
 
-def _do_retrieve(request: RagSearchRequest) -> RagSearchResponse:
+async def _do_retrieve(request: RagSearchRequest) -> RagSearchResponse:
     """执行 RAG 检索，支持测试时通过依赖注入替换底层 Client。"""
-    return rag_service.retrieve(request)
+    return await rag_service.aretrieve(request)
 
 
 def _results_to_dicts(response: RagSearchResponse) -> list[dict]:

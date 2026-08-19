@@ -1,6 +1,7 @@
 """Reusable LangGraph subgraphs for business-domain operation agents."""
 
-from collections.abc import Callable
+import inspect
+from collections.abc import Awaitable, Callable
 from functools import cache
 
 from langgraph.config import get_stream_writer
@@ -12,7 +13,7 @@ from app.operation_agent.nodes.analyze_reason_node import analyze_reason_node
 from app.operation_agent.nodes.generate_advice_node import generate_advice_node
 from app.operation_agent.state import OperationState
 
-OperationNode = Callable[[OperationState], OperationState]
+OperationNode = Callable[[OperationState], OperationState | Awaitable[OperationState]]
 
 
 def _with_stream_events(
@@ -21,7 +22,26 @@ def _with_stream_events(
     agent_key: str,
     node_func: OperationNode,
 ) -> OperationNode:
-    """Expose a real domain-agent step through the established stream contract."""
+    """Expose a real domain-agent step through the established stream contract.
+
+    与 node_func 保持相同异步性；async 包装保证取消穿透到 LLM await。
+    """
+
+    if inspect.iscoroutinefunction(node_func):
+        async def wrapped_async(state: OperationState) -> OperationState:
+            try:
+                writer = get_stream_writer()
+                writer({
+                    "kind": "node_started",
+                    "node_key": node_key,
+                    "node_name": node_name,
+                    "agent_key": agent_key,
+                })
+            except RuntimeError:
+                pass
+            return await node_func(state)
+
+        return wrapped_async
 
     def wrapped(state: OperationState) -> OperationState:
         try:
@@ -47,15 +67,15 @@ def build_domain_agent_graph(spec: DomainAgentSpec) -> CompiledStateGraph:
     reason_node = f"{spec.key}_reason"
     advice_node = f"{spec.key}_advice"
 
-    def run_reason(state: OperationState) -> OperationState:
-        return analyze_reason_node(
+    async def run_reason(state: OperationState) -> OperationState:
+        return await analyze_reason_node(
             state,
             prompt_name=spec.reason_prompt,
             action_type=spec.reason_action_type,
         )
 
-    def run_advice(state: OperationState) -> OperationState:
-        return generate_advice_node(
+    async def run_advice(state: OperationState) -> OperationState:
+        return await generate_advice_node(
             state,
             prompt_name=spec.advice_prompt,
             action_type=spec.advice_action_type,
@@ -75,8 +95,11 @@ def build_domain_agent_graph(spec: DomainAgentSpec) -> CompiledStateGraph:
     return graph.compile()
 
 
-def run_domain_agent(state: OperationState, spec: DomainAgentSpec) -> OperationState:
-    """Run the cached domain subgraph and relay its custom events to the parent stream."""
+async def run_domain_agent(state: OperationState, spec: DomainAgentSpec) -> OperationState:
+    """Run the cached domain subgraph and relay its custom events to the parent stream.
+
+    异步执行：父图对 async 节点的取消会穿透到子图的 astream。
+    """
 
     try:
         parent_writer = get_stream_writer()
@@ -84,7 +107,7 @@ def run_domain_agent(state: OperationState, spec: DomainAgentSpec) -> OperationS
         parent_writer = None
 
     final_state = state
-    for mode, data in build_domain_agent_graph(spec).stream(
+    async for mode, data in build_domain_agent_graph(spec).astream(
         state,
         stream_mode=["values", "custom"],
     ):

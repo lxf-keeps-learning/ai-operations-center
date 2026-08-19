@@ -1,6 +1,6 @@
 """Skill 执行适配层：将 Skill 转发给现有 Service/Graph。"""
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -18,7 +18,7 @@ from app.utils.ids import new_trace_id
 
 SkillExecutor = Callable[
     [SkillDefinition, dict[str, Any], SkillExecutionContext],
-    SkillExecutionResult,
+    Awaitable[SkillExecutionResult],
 ]
 
 
@@ -28,7 +28,7 @@ class ReportDeepAnswerInput(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
 
 
-def execute_skill(
+async def execute_skill(
     definition: SkillDefinition,
     inputs: dict[str, Any],
     context: SkillExecutionContext,
@@ -39,7 +39,7 @@ def execute_skill(
     executor = _EXECUTORS.get(definition.executor_id)
     if executor is None:
         raise RuntimeError(f"Skill executor not found: {definition.executor_id}")
-    return executor(definition, inputs, context)
+    return await executor(definition, inputs, context)
 
 
 def _validate_declared_inputs(
@@ -55,13 +55,13 @@ def _validate_declared_inputs(
         raise ValueError(f"Unsupported skill inputs: {', '.join(unknown)}")
 
 
-def execute_operation_analysis(
+async def execute_operation_analysis(
     definition: SkillDefinition,
     inputs: dict[str, Any],
     context: SkillExecutionContext,
 ) -> SkillExecutionResult:
     request = OperationAnalyzeRequest.model_validate(inputs)
-    state = analyze_operation(
+    state = await analyze_operation(
         request,
         user_context={
             "user_id": context.user_id,
@@ -92,13 +92,13 @@ def execute_operation_analysis(
     )
 
 
-def execute_report_deep_answer(
+async def execute_report_deep_answer(
     definition: SkillDefinition,
     inputs: dict[str, Any],
     context: SkillExecutionContext,
 ) -> SkillExecutionResult:
     request = ReportDeepAnswerInput.model_validate(inputs)
-    state = send_chat_message(
+    state = await send_chat_message(
         session_id=request.session_id,
         report_id=request.report_id,
         question=request.question,

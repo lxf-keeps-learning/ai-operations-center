@@ -93,22 +93,23 @@ def test_run_observed_is_noop_when_langsmith_is_unavailable(monkeypatch: pytest.
     assert called == [True]
 
 
-def test_base_tool_wraps_execution_as_tool_run(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.anyio
+async def test_base_tool_wraps_execution_as_tool_run(monkeypatch: pytest.MonkeyPatch) -> None:
     observed = []
 
-    def fake_observed(name, run_type, operation, **kwargs):
+    async def fake_observed(name, run_type, operation, **kwargs):
         observed.append((name, run_type, kwargs))
-        return operation()
+        return await operation
 
-    monkeypatch.setattr("app.tool_center.base_tool.run_observed", fake_observed)
+    monkeypatch.setattr("app.tool_center.base_tool.arun_observed", fake_observed)
 
     class DemoTool(BaseTool):
         name = "demo_tool"
 
-        def _execute(self, tool_input):
+        async def _execute(self, tool_input):
             return {"items": [{"id": "1"}]}, []
 
-    result = DemoTool().run(BaseToolInput(filters={"query": "安全"}))
+    result = await DemoTool().run(BaseToolInput(filters={"query": "安全"}))
 
     assert result.success is True
     assert observed[0][0:2] == ("demo_tool", "tool")

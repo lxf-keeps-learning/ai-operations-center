@@ -46,6 +46,8 @@ RATE_LIMIT = ErrorCode(code=429001, message="请求过于频繁", http_status=42
 INTERNAL_ERROR = ErrorCode(code=500001, message="系统内部错误", http_status=500, description="未预期的系统异常")
 LLM_PROVIDER_ERROR = ErrorCode(code=500101, message="大模型调用失败", http_status=502, description="LLM Provider 返回错误或调用异常")
 LLM_TIMEOUT = ErrorCode(code=504101, message="大模型调用超时", http_status=504, description="LLM Provider 调用超时")
+REPORT_TIMEOUT = ErrorCode(code=504102, message="报告生成超时", http_status=504, description="报告生成整体或 Graph 执行超时")
+SSE_IDLE_TIMEOUT = ErrorCode(code=504103, message="事件流空闲超时", http_status=504, description="SSE 事件流在空闲时限内无业务事件或心跳")
 
 # ── 扩展业务码（文档中定义，按需使用） ─────────────────
 MESSAGE_EMPTY = ErrorCode(code=400003, message="问题内容不能为空", http_status=400, description="AI 问答 message 为空")
@@ -102,6 +104,8 @@ ALL_CODES: list[ErrorCode] = [
     INTERNAL_ERROR,
     LLM_PROVIDER_ERROR,
     LLM_TIMEOUT,
+    REPORT_TIMEOUT,
+    SSE_IDLE_TIMEOUT,
     MESSAGE_EMPTY,
     SESSION_NOT_FOUND,
     TRACE_NOT_FOUND,

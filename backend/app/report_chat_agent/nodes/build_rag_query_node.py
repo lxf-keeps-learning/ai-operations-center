@@ -217,7 +217,7 @@ def _format_rewrite_prompt(state: ReportChatState, anchors: dict) -> str:
     )
 
 
-def _llm_rewrite_query(state: ReportChatState, anchors: dict) -> dict | None:
+async def _llm_rewrite_query(state: ReportChatState, anchors: dict) -> dict | None:
     """调用 LLM 改写 RAG 检索 query。
 
     Returns:
@@ -228,7 +228,7 @@ def _llm_rewrite_query(state: ReportChatState, anchors: dict) -> dict | None:
         return None
 
     try:
-        result: LlmResult = llm_client.chat(
+        result: LlmResult = await llm_client.achat(
             prompt_content=None,
             user_message=prompt,
             timeout_seconds=settings.operation_llm_timeout_seconds,
@@ -405,7 +405,7 @@ def _finalize_rag_query(
 
 # ── Main Entry ──────────────────────────────────────────
 
-def build_rag_query_node(state: ReportChatState) -> ReportChatState:
+async def build_rag_query_node(state: ReportChatState) -> ReportChatState:
     """基于用户问题和当前报告锚点构造 RAG 查询请求。
 
     Sprint6.1 升级为五层架构：
@@ -434,7 +434,7 @@ def build_rag_query_node(state: ReportChatState) -> ReportChatState:
     rewrite_attempted = False
     if settings.rag_use_query_rewrite and state.get("need_rag", False):
         rewrite_attempted = True
-        rewrite_result = _llm_rewrite_query(state, anchors)
+        rewrite_result = await _llm_rewrite_query(state, anchors)
 
     # Layer 4+5: 校验 + 决策融合。
     state = _finalize_rag_query(state, rule_query, anchors, rewrite_result, rewrite_attempted)

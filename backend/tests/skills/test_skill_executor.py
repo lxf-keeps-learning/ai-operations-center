@@ -6,10 +6,11 @@ from app.skills.definitions import OPERATION_ANALYSIS_SKILL, REPORT_DEEP_ANSWER_
 from app.skills.executor import execute_operation_analysis, execute_report_deep_answer, execute_skill
 
 
-def test_operation_executor_reuses_existing_service(monkeypatch) -> None:
+@pytest.mark.anyio
+async def test_operation_executor_reuses_existing_service(monkeypatch) -> None:
     captured = {}
 
-    def fake_analyze(request, user_context, trace_id):
+    async def fake_analyze(request, user_context, trace_id):
         captured["request"] = request
         captured["user_context"] = user_context
         captured["trace_id"] = trace_id
@@ -32,7 +33,7 @@ def test_operation_executor_reuses_existing_service(monkeypatch) -> None:
         roles=["operator"],
     )
 
-    result = execute_operation_analysis(
+    result = await execute_operation_analysis(
         OPERATION_ANALYSIS_SKILL,
         {"domain": "safety", "time_dimension": "month"},
         context,
@@ -46,8 +47,9 @@ def test_operation_executor_reuses_existing_service(monkeypatch) -> None:
     assert captured["user_context"]["tenant_id"] == "tenant_1"
 
 
-def test_report_answer_executor_reuses_existing_service(monkeypatch) -> None:
-    def fake_send(**kwargs):
+@pytest.mark.anyio
+async def test_report_answer_executor_reuses_existing_service(monkeypatch) -> None:
+    async def fake_send(**kwargs):
         return {
             "trace_id": kwargs["trace_id"],
             "conversation_id": "conv_1",
@@ -64,7 +66,7 @@ def test_report_answer_executor_reuses_existing_service(monkeypatch) -> None:
         }
 
     monkeypatch.setattr("app.skills.executor.send_chat_message", fake_send)
-    result = execute_report_deep_answer(
+    result = await execute_report_deep_answer(
         REPORT_DEEP_ANSWER_SKILL,
         {"session_id": "session_1", "report_id": 7, "question": "依据是什么？"},
         SkillExecutionContext(trace_id="trace_skill_002", user_id="user_1"),
@@ -76,27 +78,30 @@ def test_report_answer_executor_reuses_existing_service(monkeypatch) -> None:
     assert result.data["rag_sources"][0]["title"] == "安全规范"
 
 
-def test_report_answer_executor_validates_required_inputs() -> None:
+@pytest.mark.anyio
+async def test_report_answer_executor_validates_required_inputs() -> None:
     with pytest.raises(ValidationError):
-        execute_report_deep_answer(
+        await execute_report_deep_answer(
             REPORT_DEEP_ANSWER_SKILL,
             {"report_id": 7, "question": "缺少会话"},
             SkillExecutionContext(),
         )
 
 
-def test_unified_executor_rejects_undeclared_inputs() -> None:
+@pytest.mark.anyio
+async def test_unified_executor_rejects_undeclared_inputs() -> None:
     with pytest.raises(ValueError, match="Unsupported skill inputs: unsafe_param"):
-        execute_skill(
+        await execute_skill(
             OPERATION_ANALYSIS_SKILL,
             {"domain": "safety", "unsafe_param": True},
             SkillExecutionContext(),
         )
 
 
-def test_unified_executor_rejects_missing_required_inputs() -> None:
+@pytest.mark.anyio
+async def test_unified_executor_rejects_missing_required_inputs() -> None:
     with pytest.raises(ValueError, match="Missing required skill inputs: session_id"):
-        execute_skill(
+        await execute_skill(
             REPORT_DEEP_ANSWER_SKILL,
             {"report_id": 7, "question": "依据是什么？"},
             SkillExecutionContext(),

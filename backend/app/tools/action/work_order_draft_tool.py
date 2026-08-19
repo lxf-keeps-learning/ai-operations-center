@@ -7,6 +7,8 @@ from app.integrations.ioc.mock_client import MockIocApiClient
 from app.tool_center.base_tool import BaseTool
 from app.tool_center.exceptions import ToolException
 from app.tool_center.contracts import BaseToolInput, Evidence
+from app.tool_registry.contracts import ToolType
+from app.utils.ids import new_trace_id
 
 
 class WorkOrderDraftInput(BaseToolInput):
@@ -16,6 +18,14 @@ class WorkOrderDraftInput(BaseToolInput):
     description: str = Field(description="工单描述")
     priority: str = Field(default="medium", description="优先级: high / medium / low")
     suggested_assignee: str | None = Field(default=None, description="建议负责人")
+    operation_id: str | None = Field(
+        default=None,
+        description="调用方提供的操作 ID；缺省时工具生成，用于事后查询最终状态。",
+    )
+    idempotency_key: str | None = Field(
+        default=None,
+        description="幂等键；同一次意图的重复调用应携带相同值。",
+    )
 
 
 class WorkOrderDraftActionTool(BaseTool):
@@ -24,6 +34,7 @@ class WorkOrderDraftActionTool(BaseTool):
         "根据告警或隐患生成工单草稿，"
         "不直接创建真实工单，必须人工确认后才能执行。"
     )
+    tool_type = ToolType.ACTION
     allowed_priorities = {"high", "medium", "low"}
     allowed_source_types = {"alarm", "risk", "manual"}
 
@@ -31,7 +42,7 @@ class WorkOrderDraftActionTool(BaseTool):
         super().__init__()
         self._client = client or MockIocApiClient()
 
-    def _execute(
+    async def _execute(
         self,
         tool_input: BaseToolInput,
     ) -> tuple[dict | None, list[Evidence], dict[str, Any]]:
@@ -50,12 +61,18 @@ class WorkOrderDraftActionTool(BaseTool):
                 detail={"allowed_priorities": sorted(self.allowed_priorities)},
             )
 
-        source_title = self._lookup_source_title(inp)
+        operation_id = inp.operation_id or f"op_{new_trace_id()}"
+        idempotency_key = inp.idempotency_key or f"idem_{operation_id}"
+
+        source_title = await self._lookup_source_title(inp)
 
         data = {
             "action_type": "create_work_order_draft",
             "requires_human_confirmation": True,
             "status": "draft",
+            "operation_id": operation_id,
+            "idempotency_key": idempotency_key,
+            "write_result_state": "pending",  # 草稿为本地纯计算；真实写接口须上报 success/result_unknown
             "draft": {
                 "title": inp.title,
                 "description": inp.description,
@@ -82,6 +99,8 @@ class WorkOrderDraftActionTool(BaseTool):
             "source": "action_engine",
             "requires_human_confirmation": True,
             "source_type": inp.source_type,
+            "operation_id": operation_id,
+            "idempotency_key": idempotency_key,
         }
 
         return data, evidence, metadata
@@ -107,14 +126,14 @@ class WorkOrderDraftActionTool(BaseTool):
                 detail={"errors": e.errors()},
             ) from e
 
-    def _lookup_source_title(self, inp: WorkOrderDraftInput) -> str:
+    async def _lookup_source_title(self, inp: WorkOrderDraftInput) -> str:
         if inp.source_type == "manual":
             return ""
 
         if inp.source_type == "alarm":
-            resp = self._client.get_alarms(filters={"alarm_id": inp.source_id})
+            resp = await self._client.aget_alarms(filters={"alarm_id": inp.source_id})
         else:
-            resp = self._client.get_risks(filters={"risk_id": inp.source_id})
+            resp = await self._client.aget_risks(filters={"risk_id": inp.source_id})
 
         if not resp.success:
             raise ToolException(
