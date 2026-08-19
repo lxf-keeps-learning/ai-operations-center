@@ -19,6 +19,7 @@ from app.platform.api import router as platform_router
 from app.skills.api import router as skills_router
 from app.tools.api import router as tools_router
 from app.tools.register import register_all_tools
+from app.tool_registry.api import router as tool_registry_router
 from app.modules.prompt_center.api.router import router as prompt_center_router
 from app.modules.evaluation_center.api.router import router as evaluation_center_router
 from app.modules.experiment_center.api.router import router as experiment_center_router
@@ -58,6 +59,7 @@ def create_app() -> FastAPI:
     app.include_router(v1_router, prefix=settings.api_v1_prefix)
     app.include_router(runtime_router, prefix=settings.api_v1_prefix)
     app.include_router(tools_router, prefix=settings.api_v1_prefix)
+    app.include_router(tool_registry_router, prefix=settings.api_v1_prefix)
     app.include_router(operation_router, prefix=settings.api_v1_prefix)
     app.include_router(operation_records_router, prefix=settings.api_v1_prefix)
     app.include_router(report_chat_router, prefix=settings.api_v1_prefix)

@@ -63,6 +63,10 @@ LLM_RESPONSE_FORMAT_ERROR = ErrorCode(code=500102, message="大模型返回格�
 DB_CONNECTION_ERROR = ErrorCode(code=503001, message="数据库连接失败", http_status=503, description="MySQL 不可用")
 REDIS_CONNECTION_ERROR = ErrorCode(code=503002, message="Redis 连接失败", http_status=503, description="Redis 不可用")
 
+# ── 工具注册中心（Tool Registry）专用业务错误码 ─────────
+TOOL_REGISTRY_CONFIG_ERROR = ErrorCode(code=400050, message="工具注册中心配置错误", http_status=400, description="工具发布或治理配置不满足约束")
+TOOL_REGISTRY_NOT_FOUND = ErrorCode(code=404050, message="工具或版本不存在", http_status=404, description="指定的工具、版本或治理策略不存在")
+
 # ── Prompt Center 错误码 (404010-404099, 400010-400099, 403010-403099) ──
 PROMPT_NOT_FOUND_PC = ErrorCode(code=404010, message="Prompt 不存在", http_status=404, description="指定的 Prompt 不存在")
 VERSION_NOT_FOUND_PC = ErrorCode(code=404011, message="Prompt 版本不存在", http_status=404, description="指定的 Prompt 版本不存在")
