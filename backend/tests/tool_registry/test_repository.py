@@ -4,6 +4,7 @@ from collections.abc import Iterator
 import sqlite3
 
 import pytest
+from jsonschema.validators import validator_for
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -195,13 +196,15 @@ def test_load_snapshot_freezes_schema_values_without_mutating_orm_json(session: 
     assert frozen_input_schema["required"] is not version.input_schema["required"]
     assert frozen_input_schema["properties"] is not version.input_schema["properties"]
 
+    validator_for(frozen_input_schema).check_schema(frozen_input_schema)
+
     with pytest.raises(TypeError):
         frozen_input_schema["title"] = "mutated"
 
     with pytest.raises(TypeError):
         frozen_input_schema["properties"]["filters"]["type"] = "object"
 
-    with pytest.raises(AttributeError):
+    with pytest.raises(TypeError):
         frozen_input_schema["required"].append("tenant_id")
 
     assert version.input_schema == original_input_schema
