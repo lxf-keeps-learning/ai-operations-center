@@ -84,6 +84,7 @@ capability
 - `name`
 - `description`
 - `tool_type`：`query | analysis | action`
+- 可选 `action_phase`：动作工具为 `prepare | commit`，其他类型为空
 - `enabled`
 - `created_at`、`updated_at`
 
@@ -136,7 +137,7 @@ capability
 
 同一优先级只允许一条启用策略。没有匹配策略时，仅允许 `caller_type=internal` 的受信调用。兼容适配器产生的现有内部调用上下文标记为 `internal`。
 
-动作类工具始终要求人工确认，策略不得将其关闭；查询或分析工具可按需要额外开启确认。
+`action/prepare` 工具只生成待确认草稿，不得产生外部副作用，可以直接执行，但结果必须标记需要确认。`action/commit` 工具会产生外部副作用，始终要求人工确认，策略不得将其关闭。查询或分析工具可按需要额外开启确认。
 
 ### 4.4 `tool_call_audits`
 
@@ -172,7 +173,7 @@ capability
 4. 使用 `tenant_id` 一致性哈希计算 `0-99` 灰度桶；灰度候选被允许且命中比例时选择它，否则选择稳定版本。
 5. 解析所选版本的最终策略并检查权限。
 6. 按所选版本检查每分钟限流。
-7. 校验动作确认凭证。
+7. 对 `action/commit` 校验动作确认凭证；`action/prepare` 只允许生成待确认草稿。
 8. 根据 `implementation_ref` 获取 Python 执行器。
 9. 调用 `BaseTool.execute()`。
 10. 记录策略决策和执行结果。
@@ -214,7 +215,8 @@ Registry 使用进程内只读缓存：
 - 新工具默认 `draft`，发布后才能被 Agent 发现。
 - 未配置权限策略时，仅允许受信的内部调用。
 - 查询和分析工具可自动执行。
-- 动作类工具统一要求人工确认。
+- `action/prepare` 工具允许生成草稿，但不得提交外部动作。
+- `action/commit` 工具统一要求人工确认。
 - 灰度未命中时选择稳定版本。
 - 未配置限流值时使用系统默认的每租户、每版本每分钟 60 次。
 - 未配置灰度比例时按 0 处理。
@@ -238,7 +240,7 @@ Registry 使用进程内只读缓存：
 | 工具不存在、关闭或无已发布版本 | 返回“能力不可用”，不暴露内部实现名 |
 | 权限拒绝 | 返回 403，记录命中的策略 |
 | 触发限流 | 返回 429，并返回下一窗口的可重试秒数 |
-| 动作工具未确认或确认失效 | 返回“需要确认”，不执行工具 |
+| `action/commit` 未确认或确认失效 | 返回“需要确认”，不执行工具 |
 | 灰度未命中 | 使用稳定版本 |
 | 灰度版本执行失败 | 记录失败，不自动重放稳定版本 |
 | `implementation_ref` 未绑定 | 发布时阻止；运行时返回配置错误 |
@@ -266,7 +268,7 @@ Registry 使用进程内只读缓存：
 - 输入、输出 Schema 合法。
 - 稳定版本唯一。
 - 灰度比例处于 `0-100`。
-- 动作类工具保持人工确认。
+- 动作阶段合法，且 `action/commit` 保持人工确认。
 - 发布灰度版本前已经存在稳定版本。
 
 Agent 和 MCP 使用 Registry 内部服务接口，不通过管理 HTTP API 调用工具。
@@ -282,7 +284,7 @@ Agent 和 MCP 使用 Registry 内部服务接口，不通过管理 HTTP API 调�
 | `risk_query` | `query.risk` | query |
 | `work_order_query` | `query.work_order` | query |
 | `ioc_summary_analysis` | `analysis.ioc_summary` | analysis |
-| `work_order_draft` | `action.work_order.draft` | action |
+| `work_order_draft` | `action.work_order.draft` | action/prepare |
 
 迁移步骤：
 
@@ -303,7 +305,7 @@ Agent 和 MCP 使用 Registry 内部服务接口，不通过管理 HTTP API 调�
 - 固定窗口限流及可重试时间。
 - 灰度一致性哈希和稳定版本选择。
 - 无租户调用不参与灰度。
-- 动作确认凭证及参数防篡改。
+- `action/prepare` 无副作用约束、`action/commit` 确认凭证及参数防篡改。
 - 缓存刷新、稳定快照和过期降级。
 
 ### 9.2 数据库测试
@@ -337,7 +339,7 @@ Agent 和 MCP 使用 Registry 内部服务接口，不通过管理 HTTP API 调�
 - Agent 不依赖具体工具版本，只按 capability 请求能力。
 - 新版本可通过 Registry 数据完成发布、灰度和下线。
 - 正常依赖条件下，每次调用都能关联工具版本、执行器和治理策略。
-- 权限、限流和人工确认在 Tool Gateway 统一生效。
+- 权限、限流和 `action/commit` 人工确认在 Tool Gateway 统一生效。
 - 新增同类实现或替换版本不需要修改 Agent 代码。
 - `legacy` 模式可以快速回退。
 - 现有 6 个工具、Operation Graph、MCP 和 API 回归测试通过。
