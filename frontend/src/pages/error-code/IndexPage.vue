@@ -1,27 +1,27 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref } from "vue";
 
-import { getErrorCodes } from '@/api/errors'
-import type { ErrorCodeEntry } from '@/types/error-code'
+import { getErrorCodes } from "@/api/errors";
+import type { ErrorCodeEntry } from "@/types/error-code";
 
-const codes = ref<ErrorCodeEntry[]>([])
-const loading = ref(true)
-const error = ref('')
+const codes = ref<ErrorCodeEntry[]>([]);
+const loading = ref(true);
+const error = ref("");
 
 onMounted(async () => {
   try {
-    codes.value = await getErrorCodes()
+    codes.value = await getErrorCodes();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '加载失败'
+    error.value = e instanceof Error ? e.message : "加载失败";
   } finally {
-    loading.value = false
+    loading.value = false;
   }
-})
+});
 
 function httpStatusClass(status: number) {
-  if (status < 300) return 'tag tag--success'
-  if (status < 500) return 'tag tag--warning'
-  return 'tag tag--danger'
+  if (status < 300) return "tag tag--success";
+  if (status < 500) return "tag tag--warning";
+  return "tag tag--danger";
 }
 </script>
 
@@ -44,10 +44,14 @@ function httpStatusClass(status: number) {
       </thead>
       <tbody>
         <tr v-for="c in codes" :key="c.code">
-          <td><code>{{ c.code }}</code></td>
+          <td>
+            <code>{{ c.code }}</code>
+          </td>
           <td>{{ c.message }}</td>
           <td>
-            <span :class="httpStatusClass(c.httpStatus)" class="tag">{{ c.httpStatus }}</span>
+            <span :class="httpStatusClass(c.httpStatus)" class="tag">{{
+              c.httpStatus
+            }}</span>
           </td>
           <td>{{ c.description }}</td>
         </tr>
@@ -128,7 +132,16 @@ h1 {
   padding: 2px 8px;
 }
 
-.tag--success { background: #f0fdf4; color: #166534; }
-.tag--warning { background: #fffbeb; color: #854d0e; }
-.tag--danger  { background: #fef2f2; color: #991b1b; }
+.tag--success {
+  background: #f0fdf4;
+  color: #166534;
+}
+.tag--warning {
+  background: #fffbeb;
+  color: #854d0e;
+}
+.tag--danger {
+  background: #fef2f2;
+  color: #991b1b;
+}
 </style>
