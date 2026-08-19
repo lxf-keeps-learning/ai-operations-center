@@ -14,6 +14,7 @@ from app.modules.prompt_center.infrastructure.models import PromptDefinition, Pr
 from app.modules.evaluation_center.infrastructure.models import EvaluationResult, EvaluationMetric
 from app.modules.experiment_center.infrastructure.models import PromptExperiment, ExperimentResult
 from app.modules.failure_center.infrastructure.models import FailureCase
+from app.tool_registry.models import ToolCallAudit, ToolDefinition, ToolPolicy, ToolVersion
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.sqlalchemy_database_url)
