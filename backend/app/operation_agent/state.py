@@ -77,4 +77,12 @@ class OperationState(TypedDict, total=False):
     _event_persistence_disabled: NotRequired[bool]
     _streaming: NotRequired[bool]
 
+    # ── 自修复（Evaluation + Reflection + Re-plan） ─────────────────
+    recovery_context: NotRequired[dict[str, Any]]
+    evaluation_results: NotRequired[list[dict[str, Any]]]
+    recovery_events: NotRequired[list[dict[str, Any]]]
+    self_healing: NotRequired[dict[str, Any]]
+    _healing_flow: NotRequired[dict[str, Any]]
+    _content_safety_blocked: NotRequired[bool]
+
     errors: list[dict[str, Any]]

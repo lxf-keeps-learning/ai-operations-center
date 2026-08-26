@@ -12,8 +12,9 @@ import json
 from pathlib import Path
 
 from app.config.settings import settings
+from app.operation_agent.self_healing.retry_ops import achat_operation_llm
 from app.operation_agent.state import OperationState
-from app.runtime.llm.client import LlmResult, llm_client
+from app.runtime.llm.client import LlmResult, llm_client  # noqa: F401 - 测试通过该单例路径打桩
 from app.security.content_moderator import ModerationAction, content_moderator
 
 _PROMPT_DIR = Path(__file__).resolve().parent.parent / "prompts"
@@ -53,20 +54,14 @@ async def generate_advice_node(
     llm_usages: list[dict] = state.get("llm_usages", [])
 
     try:
-        result: LlmResult = await llm_client.achat(
+        result: LlmResult = await achat_operation_llm(
+            state=state,
             prompt_content=system or None,
             user_message=prompt,
+            action_type=action_type,
             timeout_seconds=settings.operation_llm_timeout_seconds,
+            node="generate_advice",
         )
-        llm_usages.append({
-            "action_type": action_type,
-            "model_name": result.model,
-            "input_tokens": result.prompt_tokens,
-            "output_tokens": result.completion_tokens,
-            "total_tokens": result.total_tokens,
-            "success": 1 if result.success else 0,
-            "error_message": result.error_message if not result.success else None,
-        })
         if result.success:
             parsed = _parse_advice(result.content)
             state["advice_items"] = _normalize_advice_items(
@@ -104,6 +99,8 @@ async def generate_advice_node(
     moderation = content_moderator.moderate_output(advice_text)
     if moderation.action in (ModerationAction.MASK, ModerationAction.BLOCK):
         state["advice_items"] = []
+        if moderation.action == ModerationAction.BLOCK:
+            state["_content_safety_blocked"] = True
 
     return state
 

@@ -144,7 +144,7 @@ async def _query_operation_snapshot(state: OperationState, errors: list[dict]) -
     # 依次按 capability 请求四个 Query Tool，将结果写入 state.raw_data
     tool_data: dict[str, dict[str, Any]] = {}
     for key, capability in _QUERY_CAPABILITIES.items():
-        result = await _run_tool(capability, filters.get(key, {}), context, errors)
+        result = await _run_tool_with_retry(state, capability, filters.get(key, {}), context, errors)
         if not result or not result.success:
             continue
 
@@ -156,13 +156,44 @@ async def _query_operation_snapshot(state: OperationState, errors: list[dict]) -
 
     # 四个 Query 都执行完毕后，调用聚合分析 Tool
     if tool_data:
-        summary = await _run_summary_tool(tool_data, context, errors)
+        summary = await _run_tool_with_retry(state, _SUMMARY_CAPABILITY, _summary_filters(tool_data), context, errors)
         if summary and summary.success and isinstance(summary.data, dict):
             raw_data["ioc_summary"] = summary.data
             evidence.extend(_serialize_evidence(summary, _evidence_label(summary, _SUMMARY_CAPABILITY)))
 
     state["metrics"] = _build_metrics(raw_data)
     state["evidence"] = [*state.get("evidence", []), *evidence]
+
+
+async def _run_tool_with_retry(
+    state: OperationState,
+    capability: str,
+    filters: dict[str, Any],
+    context: ToolContext,
+    errors: list[dict],
+) -> ToolResult | None:
+    """带 Operation 重试策略的 Tool 执行（只重试失败的查询/分析 Tool）。"""
+    from app.operation_agent.self_healing.retry_ops import run_tool_with_retry
+
+    result = await run_tool_with_retry(
+        state,
+        capability,
+        filters,
+        context,
+        node="query_operation_data",
+        attempt=lambda: _run_tool(capability, filters, context, errors),
+    )
+    if result is None:
+        errors.append({"node": "query_operation_data", "message": f"获取 {capability} Tool 失败"})
+        return None
+    if not result.success:
+        errors.append(
+            {
+                "node": "query_operation_data",
+                "message": f"{capability} 调用失败: {_tool_error_message(result)}",
+            }
+        )
+    return result
 
 
 def _load_domain_snapshot(state: OperationState, domain: str) -> None:
@@ -202,45 +233,27 @@ async def _run_tool(
     context: ToolContext,
     errors: list[dict],
 ) -> ToolResult | None:
-    """通过统一 Tool Gateway 按 capability 执行一个 Tool。
+    """通过统一 Tool Gateway 按 capability 执行一次 Tool（单次尝试）。
 
     这里不直接 import 具体 Tool 类，不关心 Client 是 Mock 还是 Real。
     legacy 模式由适配层回退旧 Registry，database 模式走治理链路。
     所有异常都被 BaseTool.run 统一包装为 ToolResult，Node 只处理 ToolResult 协议。
+    错误记录由重试入口 _run_tool_with_retry 在最终失败时统一写入。
     """
     try:
-        result = await aexecute_tool(capability, filters, context)
-    except Exception as e:
-        errors.append({"node": "query_operation_data", "message": f"获取 {capability} Tool 失败: {e}"})
+        return await aexecute_tool(capability, filters, context)
+    except Exception:
         return None
 
-    if not result.success:
-        errors.append(
-            {
-                "node": "query_operation_data",
-                "message": f"{capability} 调用失败: {_tool_error_message(result)}",
-            }
-        )
-    return result
 
-
-async def _run_summary_tool(
-    tool_data: dict[str, dict[str, Any]],
-    context: ToolContext,
-    errors: list[dict],
-) -> ToolResult | None:
-    """将四个 Query Tool 的 data 传给聚合分析能力。"""
-    return await _run_tool(
-        _SUMMARY_CAPABILITY,
-        {
-            "kpi_data": tool_data.get("kpi", {}),
-            "alarm_data": tool_data.get("alarm", {}),
-            "risk_data": tool_data.get("risk", {}),
-            "work_order_data": tool_data.get("work_order", {}),
-        },
-        context,
-        errors,
-    )
+def _summary_filters(tool_data: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """将四个 Query Tool 的 data 组装为聚合分析能力的入参。"""
+    return {
+        "kpi_data": tool_data.get("kpi", {}),
+        "alarm_data": tool_data.get("alarm", {}),
+        "risk_data": tool_data.get("risk", {}),
+        "work_order_data": tool_data.get("work_order", {}),
+    }
 
 
 def _evidence_label(result: ToolResult, capability: str) -> str:

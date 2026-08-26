@@ -32,6 +32,26 @@ from app.core.timeout import child_timeout, current_deadline
 from app.runtime.execution_control import RuntimeCancelledError
 from app.utils.timezone import now_local
 
+# ── LLM 错误分类（向后兼容：error_code 默认空串，不改变既有调用方契约） ──
+# 分类函数 classify_llm_error(exc, error_message) 定义在模块底部；
+# 以下常量供 Operation 重试层稳定引用。
+LLM_CODE_TIMEOUT = "LLM_TIMEOUT"
+LLM_CODE_NETWORK = "LLM_NETWORK_ERROR"
+LLM_CODE_RATE_LIMITED = "LLM_RATE_LIMITED"
+LLM_CODE_PROVIDER = "LLM_PROVIDER_ERROR"
+LLM_CODE_AUTH = "LLM_AUTH_ERROR"
+LLM_CODE_INVALID_REQUEST = "LLM_INVALID_REQUEST"
+LLM_CODE_CONTENT_POLICY = "LLM_CONTENT_POLICY"
+LLM_CODE_UNKNOWN = "LLM_UNKNOWN_ERROR"
+
+# 允许重试的错误码：超时 / 网络异常 / 限流 / Provider 5xx（归类为 LLM_PROVIDER_ERROR）。
+RETRYABLE_LLM_ERROR_CODES = {
+    LLM_CODE_TIMEOUT,
+    LLM_CODE_NETWORK,
+    LLM_CODE_RATE_LIMITED,
+    LLM_CODE_PROVIDER,
+}
+
 
 @dataclass
 class LlmResult:
@@ -229,9 +249,12 @@ class LlmClient:
             )
         except Exception as e:
             cost_ms = max(1, int((perf_counter() - start) * 1000))
-            error_msg = str(e)
-            if "timeout" in error_msg.lower():
-                error_msg = f"{provider.display_name} API 调用超时"
+            error_code = classify_llm_error(e, str(e))
+            error_msg = (
+                f"{provider.display_name} API 调用超时"
+                if error_code == LLM_CODE_TIMEOUT
+                else f"{provider.display_name} API 调用异常: {e}"
+            )
             return LlmResult(
                 content="",
                 model=provider.model,
@@ -240,8 +263,9 @@ class LlmClient:
                 total_tokens=0,
                 cost_ms=cost_ms,
                 success=False,
-                error_message=f"{provider.display_name} API 调用异常: {error_msg}",
+                error_message=error_msg,
                 system_prompt=system_content,
+                error_code=error_code,
             )
 
     async def achat(
@@ -338,9 +362,12 @@ class LlmClient:
             raise
         except Exception as e:
             cost_ms = max(1, int((perf_counter() - start) * 1000))
-            error_msg = str(e)
-            if "timeout" in error_msg.lower():
-                error_msg = f"{provider.display_name} API 调用超时"
+            error_code = classify_llm_error(e, str(e))
+            error_msg = (
+                f"{provider.display_name} API 调用超时"
+                if error_code == LLM_CODE_TIMEOUT
+                else f"{provider.display_name} API 调用异常: {e}"
+            )
             return LlmResult(
                 content="",
                 model=provider.model,
@@ -349,9 +376,9 @@ class LlmClient:
                 total_tokens=0,
                 cost_ms=cost_ms,
                 success=False,
-                error_message=f"{provider.display_name} API 调用异常: {error_msg}",
+                error_message=error_msg,
                 system_prompt=system_content,
-                error_code="LLM_PROVIDER_ERROR",
+                error_code=error_code,
             )
 
     async def astream_chat(
@@ -471,9 +498,12 @@ class LlmClient:
             raise
         except Exception as e:
             cost_ms = max(1, int((perf_counter() - start) * 1000))
-            error_msg = str(e)
-            if "timeout" in error_msg.lower():
-                error_msg = f"{provider.display_name} API 调用超时"
+            error_code = classify_llm_error(e, str(e))
+            error_msg = (
+                f"{provider.display_name} API 调用超时"
+                if error_code == LLM_CODE_TIMEOUT
+                else f"{provider.display_name} API 调用异常: {e}"
+            )
             return LlmResult(
                 content="".join(content_parts),
                 model=model_name,
@@ -482,9 +512,9 @@ class LlmClient:
                 total_tokens=usage.get("total_tokens", 0),
                 cost_ms=cost_ms,
                 success=False,
-                error_message=f"{provider.display_name} API 调用异常: {error_msg}",
+                error_message=error_msg,
                 system_prompt=system_content,
-                error_code="LLM_PROVIDER_ERROR",
+                error_code=error_code,
             )
 
     def stream_chat(
@@ -565,9 +595,12 @@ class LlmClient:
             )
         except Exception as e:
             cost_ms = max(1, int((perf_counter() - start) * 1000))
-            error_msg = str(e)
-            if "timeout" in error_msg.lower():
-                error_msg = f"{provider.display_name} API 调用超时"
+            error_code = classify_llm_error(e, str(e))
+            error_msg = (
+                f"{provider.display_name} API 调用超时"
+                if error_code == LLM_CODE_TIMEOUT
+                else f"{provider.display_name} API 调用异常: {e}"
+            )
             return LlmResult(
                 content="".join(content_parts),
                 model=model_name,
@@ -576,8 +609,9 @@ class LlmClient:
                 total_tokens=usage.get("total_tokens", 0),
                 cost_ms=cost_ms,
                 success=False,
-                error_message=f"{provider.display_name} API 调用异常: {error_msg}",
+                error_message=error_msg,
                 system_prompt=system_content,
+                error_code=error_code,
             )
 
 
@@ -585,6 +619,52 @@ def _deadline_expired() -> bool:
     """当前上下文的 Deadline 是否已过期（区分 Deadline 取消与用户主动取消）。"""
     current = current_deadline()
     return current is not None and current.expired
+
+
+def classify_llm_error(exc: Exception, error_message: str) -> str:
+    """对 Provider 异常做稳定、向后兼容的错误码分类。
+
+    新增分类不改变正常调用方契约；LlmResult.success / content / tokens 等字段保持不变，
+    仅让失败路径拥有更精确的 error_code，供 Operation Agent 重试与自修复决策使用。
+    """
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, int):
+        if status_code == 401 or status_code == 403:
+            return "LLM_AUTH_ERROR"
+        if status_code == 429:
+            return "LLM_RATE_LIMITED"
+        if status_code == 408:
+            return "LLM_TIMEOUT"
+        if 400 <= status_code < 500:
+            return "LLM_INVALID_REQUEST"
+        if status_code >= 500:
+            return "LLM_PROVIDER_ERROR"
+
+    lowered = (error_message or "").lower()
+    if _contains_any(
+        lowered,
+        ("connecterror", "connectionerror", "connection error", "network error",
+         "connection refused", "timed out", "timeout", "dns", "unreachable",
+         "eof", "remote disconnected", "server disconnected", "read error"),
+    ):
+        if _contains_any(lowered, ("timed out", "timeout")):
+            return "LLM_TIMEOUT"
+        return "LLM_NETWORK_ERROR"
+    if _contains_any(lowered, ("api key", "apikey", "authentication", "unauthorized", "invalid_api_key", "permission denied")):
+        return "LLM_AUTH_ERROR"
+    if _contains_any(lowered, ("rate limit", "429", "too many requests")):
+        return "LLM_RATE_LIMITED"
+    if _contains_any(
+        lowered,
+        ("content filter", "content_filter", "safety system", "policy violation",
+         "moderation", "content policy", "refused to answer", "sensitive content"),
+    ):
+        return "LLM_CONTENT_POLICY"
+    return LLM_CODE_UNKNOWN
+
+
+def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
+    return any(marker in text for marker in markers)
 
 
 def _build_messages(

@@ -55,9 +55,45 @@ class Settings(BaseSettings):
         description="发送到 LangSmith 前是否递归脱敏输入和输出。",
     )
     operation_llm_timeout_seconds: float = Field(
-        default=60.0,
+        default=30.0,
         gt=0,
-        description="Operation Agent 调用 LLM 生成报告片段的单次超时时间（已对齐 llm_timeout_seconds 默认 60s）。",
+        description="Operation Agent 调用 LLM 生成报告片段的单次超时时间，为评估和修订预留总预算。",
+    )
+
+    # ── Operation 自修复（Evaluation + Reflection + Re-plan + 安全降级） ──
+    operation_self_healing_enabled: bool = Field(
+        default=False,
+        description="是否启用 Operation Agent 自修复闭环；关闭时保持原有 Graph 行为。",
+    )
+    operation_retry_max_attempts: int = Field(
+        default=2,
+        ge=1,
+        description="Operation Tool/LLM 最大尝试次数（初次调用 + 最多一次重试）。",
+    )
+    operation_retry_initial_backoff_seconds: float = Field(
+        default=0.5,
+        gt=0,
+        description="Operation 重试退避初值（秒）。",
+    )
+    operation_retry_max_backoff_seconds: float = Field(
+        default=2.0,
+        gt=0,
+        description="Operation 重试退避上限（秒）。",
+    )
+    operation_self_healing_max_cycles: int = Field(
+        default=1,
+        ge=0,
+        description="Operation 质量修复最大周期数（0 表示关闭修复）。",
+    )
+    operation_judge_timeout_seconds: float = Field(
+        default=12.0,
+        gt=0,
+        description="Operation LLM Judge 单次调用超时（秒）。",
+    )
+    operation_min_recovery_budget_seconds: float = Field(
+        default=15.0,
+        gt=0,
+        description="剩余预算少于该值时不再 sleep 或发起下一次重试调用。",
     )
 
     # ── 超时与取消策略（绝对 Deadline + 全链路异步取消） ──────────────────
